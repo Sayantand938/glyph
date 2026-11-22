@@ -10,15 +10,15 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: Phase 4 — Bulk JSON Importer (next up).** Phases 1–3 are done and verified, and the Next.js → Vite migration is complete.
+**Current phase: Phase 5 — Dashboard & Backup (next up).** Phases 1–4 are done and verified, and the Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Project setup (PWA manifest, icons, Vitest, base layout) | Done |
 | 2 | Data layer (Dexie schema, scheduler, seed, repo) | Done |
 | 3 | Pure utilities (`normalizeAnswer`, `noteId`, `seededShuffle`) | Done |
-| 4 | Bulk JSON importer | **Next** |
-| 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | Not started |
+| 4 | Bulk JSON importer | Done |
+| 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | **Next** |
 | 6 | Study session & inline editor | Not started |
 | 7 | PWA offline verification (plugin already configured) | Not started |
 
@@ -27,6 +27,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Phase 1:** PWA manifest (in `vite.config.ts`), icons in `public/icons/`, `vitest.config.ts`, base layout with dark mode, mobile-first `max-w-3xl` container.
 - **Phase 2:** `src/db/database.ts` (Dexie v1 schema, `initDatabase()` = persist + seed), `types.ts`, `scheduler.ts` (ts-fsrs wrapper, `formatInterval`, `previewIntervals`, `grade`), `seed.ts`, `repo.ts` (decks, `saveNote`, `applyReview`, `undoReview`), `src/components/db-provider.tsx` gating render on startup. Scheduler unit-tested.
 - **Phase 3:** `src/lib/answer.ts`, `src/lib/hash.ts` (`cyrb53`, `normalizeQuestion`, `noteId`), `src/lib/shuffle.ts` (`mulberry32`, `seededShuffle`), each with a `*.test.ts`. 53 tests pass in total; typecheck, lint and build clean.
+- **Phase 4:** `src/lib/importer.ts` (`parseImportText`, `validateRows`, `planImport`, `resolveDeckRef`, `summarize`, `formatSummary`; pure), `commitImport()` in `src/db/repo.ts` (one transaction: resolve/create Subject + Topic, re-plan against stored notes, `bulkPut` notes, `bulkAdd` cards for new notes only), `src/components/import-modal.tsx` + `src/components/ui/dialog.tsx` (base-ui Dialog), and a temporary "Import JSON" button and result banner in `App.tsx`. 30 new tests (83 total). Verified in the browser: import, idempotent re-import (0 new / 9 unchanged / 1 updated), card progress preserved, case-insensitive Subject/Topic reuse, invalid-file errors, 375px layout.
 
 ### Deviations from the plan
 
@@ -39,12 +40,20 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Component paths.** Components in the layout below are `src/components/<name>.tsx` in kebab-case (e.g. `db-provider.tsx`), matching the shadcn convention.
 - `noteId` also exports `normalizeQuestion`, and `src/lib/hash.ts` exports `cyrb53`, because the shuffle seeds from the same hash.
 
-### Next steps (Phase 4)
+### Phase 4 notes
 
-1. `src/lib/importer.ts`: `validateRows()`, `planImport()` (pure, tested), `commitImport()` (single Dexie transaction, `bulkPut`/`bulkAdd`).
-2. `src/components/import-modal.tsx`: file pick + drag-and-drop, target Subject/Topic selection with case-insensitive name reuse, preview counts, invalid-row list, commit.
-3. A temporary entry point on the home page to open the modal (the real dashboard is Phase 5).
-4. Tests for validation, plan counts, and idempotent re-import (0 new / 0 updated).
+- A re-import refreshes `sl`, `options`, `correctIndex` and `extra` only; the stored question text (and id) is kept, so inline edits to wording are never overwritten.
+- Resurrecting a soft-deleted note counts as "updated" and bumps `contentUpdatedAt` so it beats the tombstone in a Phase 5 merge.
+- `commitImport` re-matches Subject/Topic names against the database inside its transaction, so a stale preview can't create duplicate decks. The one case where it touches `cards` for an existing note: the card row is missing, then a fresh one is added.
+- The modal previews against the live stored notes; for a not-yet-created topic every row is "new".
+- Importer rows accept numeric `sl`/options/answer; the key is `questions` (plural), as in the plan.
+- The 10 MB cap is checked before reading the file. The commit is not chunked (a single `bulkPut`/`bulkAdd`), which is fine for the few-thousand-row target.
+
+### Next steps (Phase 5)
+
+1. `src/lib/queue.ts` (`buildQueue`) and `src/lib/backup.ts` (`exportBackup`, `parseBackup`, pure `mergeBackup`) with tests.
+2. Dashboard + deck tree with per-topic New / Learning / Due counts, replacing the temporary Import button in `App.tsx`.
+3. Header menu: Import JSON, Export Backup, Import Backup.
 
 ---
 
