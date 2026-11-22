@@ -4,6 +4,7 @@ import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
 import { HeaderMenu } from "@/components/header-menu"
 import { ImportModal } from "@/components/import-modal"
+import { PwaToast } from "@/components/pwa-toast"
 import { StudySession } from "@/components/study-session"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { formatSummary } from "@/lib/importer"
@@ -69,9 +70,18 @@ export default function App() {
         )}
       </main>
 
-      <footer className="border-t py-4 text-xs text-muted-foreground">
-        press <kbd className="border px-1">d</kbd> to toggle dark mode
+      <footer className="space-y-1 border-t py-4 text-xs text-muted-foreground">
+        <p>
+          Your data lives only in this browser. Export a backup regularly, and
+          on iPhone or iPad add Glyph to the Home Screen so the system is less
+          likely to clear it.
+        </p>
+        <p>
+          press <kbd className="border px-1">d</kbd> to toggle dark mode
+        </p>
       </footer>
+
+      <PwaToast />
 
       <ImportModal
         open={importOpen}

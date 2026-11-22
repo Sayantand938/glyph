@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: Phase 7 — PWA Offline Verification (next up).** Phases 1–6 are done and verified, and the Next.js → Vite migration is complete.
+**Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -20,7 +20,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 | 4 | Bulk JSON importer | Done |
 | 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | Done |
 | 6 | Study session & inline editor | Done |
-| 7 | PWA offline verification (plugin already configured) | **Next** |
+| 7 | PWA offline verification (plugin already configured) | Done (placeholder icons still to replace) |
 
 ### Done
 
@@ -31,13 +31,15 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Phase 5:** `src/lib/queue.ts` (`buildQueue`, `countCards`, `capNew`, `studyDayStart`, `countNewIntroduced`, `remainingNew`) and `src/lib/backup.ts` (`exportBackup`, `parseBackup`, pure `mergeBackup`, `formatMergeSummary`, `backupFilename`), 42 new tests (125 total). `src/db/queries.ts` (read-only: `loadDashboard`, `readAllData`) and `importBackup()` in `repo.ts` (one transaction over all four tables, writes only changed rows). UI: `dashboard.tsx`, `deck-tree.tsx`, `deck-dialogs.tsx` (rename / soft-delete with confirm), `header-menu.tsx`, `ui/dropdown-menu.tsx`, `hooks/use-backup-controls.tsx`, `hooks/use-stored-state.ts`; `App.tsx` is now the real shell. Verified in the browser: dashboard counts, collapse state, rename validation, header menu, backup export/parse/merge round trip (no-op re-import), older backup over newer progress keeps the newer rows, and a review/undo moves "new today" 0 -> 1 -> 0. Not exercised in the browser: the actual file download and file-picker import (the same code paths were run from the page without the file dialogs), and the delete dialog's confirm button.
 - **Phase 6:** `src/lib/session.ts` (`optionOrder`, `requeueGap`, `requeueAgain`, `summarizeSession`, `formatDuration`) and `src/lib/note-edit.ts` (`validateDraft`, `cleanDraft`, `draftChangesNote`), pure with 20 new tests (146 total). `loadStudyCards` / `loadStudyCard` in `src/db/queries.ts` (read-only). UI: `study-session.tsx`, `option-button.tsx`, `edit-note-modal.tsx`; `App.tsx` now opens the session from the dashboard's Study button (the header menu is hidden during a session). Verified in the browser at ~400px: Topic sessions (10 and 3 cards), wrong answer (red/green with icons, extra, Next, re-queued 3-5 cards later), right answer (Hard/Good/Easy previews, Space = Good, 1/2/3), undo (card row and revlog restored, queue restored, same option order), edit mid-answer (text updates in place, position/phase/order unchanged, correct-index change re-highlights, recorded result kept), edit with "Reset FSRS progress" (card back to New, revlog kept, undo disabled), Esc exit confirm, shuffle toggle off, A-D keys, summary screen, undo from the summary, and the dashboard counts afterwards. Not exercised in the browser: a Subject session with several topics (same code path as a Topic with `mixed: true`), the "question no longer available" screen, and the offline case (Phase 7).
 
+- **Phase 7:** `src/components/pwa-toast.tsx` (`useRegisterSW` from `virtual:pwa-register/react`) shows "Ready to work offline." once the precache is installed and "Update available" with Reload / Later when a new service worker is waiting; mounted in `App.tsx`. `registerType` changed from `autoUpdate` to `prompt` (see below), and `vite-plugin-pwa/react` was added to `tsconfig.json` `types`. The dashboard footer now carries the "data lives only in this browser, export backups, add to Home Screen on iOS" hint. The iOS meta tags (`apple-touch-icon`, `apple-mobile-web-app-capable`, title, status bar) were already in `index.html`. Verified in the browser against `npm run preview`: the service worker installs and precaches 18 entries, the "Ready to work offline" toast appears, then with the preview server stopped (a real offline test, not just DevTools throttling) the page reloads from the cache, a card was answered and rated Good (1 revlog row, card state Learning), and after another offline reload the dashboard showed 1 new today and the revlog row was still there. A changed `sw.js` produced the "Update available" toast and Reload activated the new worker. Not done: replacing the placeholder icons (needs real art); not exercised on a real iOS device or as an installed PWA.
+
 ### Deviations from the plan
 
 - **Migrated from Next.js to Vite** (after Phase 3, before Phase 4). Reason: a fully client-side, offline PWA gains nothing from SSR, Dexie is browser-only, and `vite-plugin-pwa` (in the original plan) makes Phase 7 trivial. Changes: code moved under `src/` (alias `@/*` → `src/`), `index.html` + `src/main.tsx` replace `app/layout.tsx`, the manifest moved into `vite.config.ts`, `next/font` became `@fontsource-variable/jetbrains-mono` (self-hosted, precached), ESLint switched to `typescript-eslint` + react-hooks + react-refresh, and dev runs on port 5173.
 - **Custom theme provider instead of `next-themes`.** `next-themes` renders a `<script>` that React 19 logs as a console error on client renders. `src/components/theme-provider.tsx` + `src/hooks/use-theme.ts` reimplement light/dark/system (same `theme` localStorage key, `d` hotkey) and `index.html` applies the theme before first paint. `next-themes` was removed.
 - **Removed `scripts/generate-icons.mjs`.** It depended on `next/og`. The generated PNGs in `public/icons/` are committed and still used; they are placeholders to replace with real art.
 - **`@vitejs/plugin-react` installed with `--legacy-peer-deps`** (optional Babel peer clashes with shadcn's Babel 7). `@eslint/js` pinned to `^9` to match ESLint 9.
-- **No service-worker registration code yet.** `vite-plugin-pwa` is configured (`registerType: 'autoUpdate'`, precache for js/css/html/svg/png/ico/woff2) and generates `dist/sw.js`, but the optional "Update available / Ready offline" toast (`virtual:pwa-register`) is still to do in Phase 7.
+- **`registerType: 'prompt'` instead of `'autoUpdate'`.** With `autoUpdate` the new service worker activates and the page reloads on its own, which would end a study session mid-card. With `prompt` the update waits until the user taps Reload in the toast. Precache is unchanged (js/css/html/svg/png/ico/woff2).
 - **Phase 3 scope.** Plan §4.4 (`buildQueue`) and §4.5 (backup merge) only point forward to Phases 5/6, so they are built with their phases, not here. Phase 3 delivered the three standalone utilities.
 - **Component paths.** Components in the layout below are `src/components/<name>.tsx` in kebab-case (e.g. `db-provider.tsx`), matching the shadcn convention.
 - `noteId` also exports `normalizeQuestion`, and `src/lib/hash.ts` exports `cyrb53`, because the shuffle seeds from the same hash.
@@ -73,12 +75,11 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Keyboard.** One window `keydown` listener in the capture phase; a handled key gets `preventDefault` (this also stops the global `d` theme hotkey when `D` picks an option) and `stopPropagation` (so an Escape that opens the exit dialog isn't also seen by the dialog's own Escape handler). Shortcuts are ignored while an edit/exit dialog is open, while typing in a field, with modifier keys, and on key repeat. Space/Enter are left to a focused button, and the session drops focus after a click on an option or Undo so Space still means Next/Good.
 - **Edge cases.** A card whose note was deleted mid-session shows "This question is no longer available" with a Skip button. If a write fails (for example ts-fsrs rejecting a hand-edited card with an invalid memory state) the error is shown in the session and nothing advances. Between cards there is a brief "Loading..." while the live query resolves.
 
-### Next steps (Phase 7)
+### Next steps
 
-1. Verify offline with `npm run build && npm run preview`: load once, go offline, reload, study a card, confirm the review persists after reload.
-2. Add the "Update available / Ready offline" toast with `virtual:pwa-register`.
-3. iOS meta tags (`apple-touch-icon`, `apple-mobile-web-app-capable`) and the backup-reminder hint on the dashboard footer.
-4. Replace the placeholder PWA icons.
+1. Replace the placeholder PWA icons in `public/icons/` (192, 512, maskable-512, apple-touch-icon) with real art.
+2. Install the production build as a PWA on a phone (Android and iOS) and repeat the offline check there; the manual test script's items 14-15 were only checked in the desktop browser pane.
+3. Items from "Nice-to-Haves" in section 12, if wanted.
 
 ---
 
