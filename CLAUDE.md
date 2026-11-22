@@ -36,7 +36,7 @@ src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo.ts (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer, queue, backup
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer, queue, backup, session, note-edit
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```

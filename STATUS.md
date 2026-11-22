@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: Phase 6 — Study Session & Inline Editor (next up).** Phases 1–5 are done and verified, and the Next.js → Vite migration is complete.
+**Current phase: Phase 7 — PWA Offline Verification (next up).** Phases 1–6 are done and verified, and the Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -19,8 +19,8 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 | 3 | Pure utilities (`normalizeAnswer`, `noteId`, `seededShuffle`) | Done |
 | 4 | Bulk JSON importer | Done |
 | 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | Done |
-| 6 | Study session & inline editor | **Next** |
-| 7 | PWA offline verification (plugin already configured) | Not started |
+| 6 | Study session & inline editor | Done |
+| 7 | PWA offline verification (plugin already configured) | **Next** |
 
 ### Done
 
@@ -29,6 +29,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Phase 3:** `src/lib/answer.ts`, `src/lib/hash.ts` (`cyrb53`, `normalizeQuestion`, `noteId`), `src/lib/shuffle.ts` (`mulberry32`, `seededShuffle`), each with a `*.test.ts`. 53 tests pass in total; typecheck, lint and build clean.
 - **Phase 4:** `src/lib/importer.ts` (`parseImportText`, `validateRows`, `planImport`, `resolveDeckRef`, `summarize`, `formatSummary`; pure), `commitImport()` in `src/db/repo.ts` (one transaction: resolve/create Subject + Topic, re-plan against stored notes, `bulkPut` notes, `bulkAdd` cards for new notes only), `src/components/import-modal.tsx` + `src/components/ui/dialog.tsx` (base-ui Dialog), and a temporary "Import JSON" button and result banner in `App.tsx`. 30 new tests (83 total). Verified in the browser: import, idempotent re-import (0 new / 9 unchanged / 1 updated), card progress preserved, case-insensitive Subject/Topic reuse, invalid-file errors, 375px layout.
 - **Phase 5:** `src/lib/queue.ts` (`buildQueue`, `countCards`, `capNew`, `studyDayStart`, `countNewIntroduced`, `remainingNew`) and `src/lib/backup.ts` (`exportBackup`, `parseBackup`, pure `mergeBackup`, `formatMergeSummary`, `backupFilename`), 42 new tests (125 total). `src/db/queries.ts` (read-only: `loadDashboard`, `readAllData`) and `importBackup()` in `repo.ts` (one transaction over all four tables, writes only changed rows). UI: `dashboard.tsx`, `deck-tree.tsx`, `deck-dialogs.tsx` (rename / soft-delete with confirm), `header-menu.tsx`, `ui/dropdown-menu.tsx`, `hooks/use-backup-controls.tsx`, `hooks/use-stored-state.ts`; `App.tsx` is now the real shell. Verified in the browser: dashboard counts, collapse state, rename validation, header menu, backup export/parse/merge round trip (no-op re-import), older backup over newer progress keeps the newer rows, and a review/undo moves "new today" 0 -> 1 -> 0. Not exercised in the browser: the actual file download and file-picker import (the same code paths were run from the page without the file dialogs), and the delete dialog's confirm button.
+- **Phase 6:** `src/lib/session.ts` (`optionOrder`, `requeueGap`, `requeueAgain`, `summarizeSession`, `formatDuration`) and `src/lib/note-edit.ts` (`validateDraft`, `cleanDraft`, `draftChangesNote`), pure with 20 new tests (146 total). `loadStudyCards` / `loadStudyCard` in `src/db/queries.ts` (read-only). UI: `study-session.tsx`, `option-button.tsx`, `edit-note-modal.tsx`; `App.tsx` now opens the session from the dashboard's Study button (the header menu is hidden during a session). Verified in the browser at ~400px: Topic sessions (10 and 3 cards), wrong answer (red/green with icons, extra, Next, re-queued 3-5 cards later), right answer (Hard/Good/Easy previews, Space = Good, 1/2/3), undo (card row and revlog restored, queue restored, same option order), edit mid-answer (text updates in place, position/phase/order unchanged, correct-index change re-highlights, recorded result kept), edit with "Reset FSRS progress" (card back to New, revlog kept, undo disabled), Esc exit confirm, shuffle toggle off, A-D keys, summary screen, undo from the summary, and the dashboard counts afterwards. Not exercised in the browser: a Subject session with several topics (same code path as a Topic with `mixed: true`), the "question no longer available" screen, and the offline case (Phase 7).
 
 ### Deviations from the plan
 
@@ -52,7 +53,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ### Phase 5 notes
 
-- **Study button is a stub.** The dashboard computes the remaining daily new-card allowance and passes `(scope, remainingNew)` to `onStudy`; until Phase 6 `App.tsx` just shows a notice. Phase 6 should call `buildQueue` (Topic: `mixed: false`; Subject: `mixed: true`) with cards read from `db.cards` (non-tombstoned notes only, like `loadDashboard`).
+- **Study button.** The dashboard computes the remaining daily new-card allowance and passes `(scope, remainingNew)` to `onStudy`. Phase 6 wired it: the session calls `buildQueue` (Topic: `mixed: false`; Subject: `mixed: true`) with cards from `loadStudyCards` (non-tombstoned notes only, like `loadDashboard`).
 - **Counts use the `topicId` index plus pure `countCards`**, not the `[topicId+state]` / `[topicId+due]` compound indexes the plan mentions (a topic's cards are loaded once and counted in JS; dead notes are excluded via the `deletedAt` index). The compound indexes are still defined for Phase 6.
 - **Learning count = Learning/Relearning cards due now.** The dashboard re-reads every 60 s so cards that become due (and the 04:00 rollover) appear without a reload. A non-due learning card is in neither the count nor the queue.
 - **Daily new limit:** `glyph.newLimit` in localStorage (default 20), editable on the dashboard. "Introduced today" = distinct cards whose first-ever revlog entry is on/after the 04:00 day start (a card whose FSRS was reset and re-reviewed does not count again). Each row's New is `min(raw, remaining)`; a Subject sums raw New across its topics, then caps.
@@ -62,11 +63,22 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Header menu:** three buttons from the `sm` breakpoint up, a single menu below it. The collapsed-Subjects set is stored in `glyph.collapsed`.
 - **Vite dev gotcha:** adding a new `@base-ui/react/*` entry point made the dev server re-optimize deps and load two copies of React ("Invalid hook call", blank page). Stopping the server and deleting `node_modules/.vite` fixed it.
 
-### Next steps (Phase 6)
+### Phase 6 notes
 
-1. `StudySession.tsx`: build the queue once with `buildQueue`, option shuffle via `seededShuffle`, answer flow with `applyReview` / `undoReview`, keyboard map, re-queue on Again.
-2. `EditNoteModal.tsx` using `saveNote()`, including the "Reset FSRS progress" option.
-3. Wire `onStudy` in `App.tsx` to open the session, replacing the notice stub.
+- **Option order is keyed on the queue position, not an attempt counter.** `optionOrder(seed, cardId, position, shuffle)` uses the card's index in the queue, which is fixed for one card view, differs for a re-queued copy, and returns the same order after an undo. The order depends on option indexes only, so edits never reshuffle.
+- **Answer flow.** A wrong pick saves an `Again` review at once and inserts a copy of the card 3-5 positions later (`requeueGap`, deterministic per seed/card/position; appended when fewer cards remain). A right pick saves nothing until Hard/Good/Easy is chosen, so the preview intervals come from the unreviewed row. Only `Again` re-queues; a Learning card rated Hard/Good is not re-shown in the same session.
+- **Undo** keeps a stack of entries (revlog id, previous card row, the queue and position from before the answer). `undoReview` restores the row and deletes the log, and the queue snapshot removes any re-queued copy. After "Reset FSRS progress" the card's earlier entries are marked not undoable (the saved row would otherwise bring the old progress back); the Undo button is disabled when the top entry is such an entry. Undo also works from the summary screen, and a pending right pick (nothing saved) is discarded by it.
+- **Progress** shows `position / queue length`, so the denominator grows by one per re-queue. The summary counts distinct cards, answers, accuracy (correct picks / answers) and the summed answer time.
+- **Editor** works on its own copy of the note, trims text on save, skips the write (no `contentUpdatedAt` bump) when nothing changed and Reset is off, and shows inline errors with Save disabled until valid. The correct answer is a radio group in the note's original option order. `sl` and the topic are not editable.
+- **Keyboard.** One window `keydown` listener in the capture phase; a handled key gets `preventDefault` (this also stops the global `d` theme hotkey when `D` picks an option) and `stopPropagation` (so an Escape that opens the exit dialog isn't also seen by the dialog's own Escape handler). Shortcuts are ignored while an edit/exit dialog is open, while typing in a field, with modifier keys, and on key repeat. Space/Enter are left to a focused button, and the session drops focus after a click on an option or Undo so Space still means Next/Good.
+- **Edge cases.** A card whose note was deleted mid-session shows "This question is no longer available" with a Skip button. If a write fails (for example ts-fsrs rejecting a hand-edited card with an invalid memory state) the error is shown in the session and nothing advances. Between cards there is a brief "Loading..." while the live query resolves.
+
+### Next steps (Phase 7)
+
+1. Verify offline with `npm run build && npm run preview`: load once, go offline, reload, study a card, confirm the review persists after reload.
+2. Add the "Update available / Ready offline" toast with `virtual:pwa-register`.
+3. iOS meta tags (`apple-touch-icon`, `apple-mobile-web-app-capable`) and the backup-reminder hint on the dashboard footer.
+4. Replace the placeholder PWA icons.
 
 ---
 

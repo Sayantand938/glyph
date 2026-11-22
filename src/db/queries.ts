@@ -8,7 +8,7 @@ import {
 } from "@/lib/queue"
 
 import { db } from "./database"
-import type { Deck } from "./types"
+import type { CardRow, Deck, Note } from "./types"
 
 export interface DashboardData {
   /** Live Subjects, sorted by name. */
@@ -96,6 +96,56 @@ async function introducedSince(dayStart: number): Promise<number> {
     .and((log) => log.reviewedAt < dayStart)
     .toArray()
   return countNewIntroduced(today, new Set(earlier.map((log) => log.cardId)))
+}
+
+/**
+ * The cards a study session can draw from: cards of live notes in live Topics
+ * (under live Subjects) within `scope`. Feed the result to `buildQueue`.
+ */
+export async function loadStudyCards(scope: {
+  kind: "subject" | "topic"
+  id: string
+}): Promise<CardRow[]> {
+  return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
+    const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
+    const liveSubjects = new Set(
+      decks.filter((d) => d.parentId === null).map((d) => d.id)
+    )
+    const topicIds = decks
+      .filter(
+        (d) =>
+          d.parentId !== null &&
+          liveSubjects.has(d.parentId) &&
+          (scope.kind === "subject"
+            ? d.parentId === scope.id
+            : d.id === scope.id)
+      )
+      .map((d) => d.id)
+
+    const deadNotes = new Set(
+      await db.notes.where("deletedAt").above(0).primaryKeys()
+    )
+    const cards = await db.cards.where("topicId").anyOf(topicIds).toArray()
+    return cards.filter((card) => !deadNotes.has(card.noteId))
+  })
+}
+
+export interface StudyCardView {
+  card: CardRow
+  note: Note
+}
+
+/** A card and its live note for display, or null if either is gone or deleted. */
+export async function loadStudyCard(
+  cardId: string
+): Promise<StudyCardView | null> {
+  return db.transaction("r", [db.notes, db.cards], async () => {
+    const card = await db.cards.get(cardId)
+    if (!card) return null
+    const note = await db.notes.get(card.noteId)
+    if (!note || note.deletedAt !== null) return null
+    return { card, note }
+  })
 }
 
 /** Every row of every table, read in one snapshot, for export and merging. */
