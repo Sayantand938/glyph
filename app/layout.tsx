@@ -1,15 +1,40 @@
-import { Geist, Geist_Mono } from "next/font/google"
+import type { Metadata, Viewport } from "next"
+import { JetBrains_Mono } from "next/font/google"
 
 import "./globals.css"
+import { DbProvider } from "@/components/db-provider"
 import { ThemeProvider } from "@/components/theme-provider"
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'})
-
-const fontMono = Geist_Mono({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-jetbrains-mono",
 })
+
+export const metadata: Metadata = {
+  title: "Glyph",
+  description: "Offline-first spaced-repetition MCQ study app.",
+  appleWebApp: {
+    capable: true,
+    title: "Glyph",
+    statusBarStyle: "black-translucent",
+  },
+  other: { "apple-mobile-web-app-capable": "yes" },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/icons/apple-touch-icon.png",
+  },
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
+}
 
 export default function RootLayout({
   children,
@@ -20,10 +45,12 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", geist.variable)}
+      className={cn("antialiased", jetbrainsMono.variable)}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <DbProvider>{children}</DbProvider>
+        </ThemeProvider>
       </body>
     </html>
   )
