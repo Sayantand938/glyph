@@ -1,4 +1,4 @@
-export default function Page() {
+export default function App() {
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-3xl flex-col px-4 sm:px-6">
       <header className="flex items-center justify-between border-b py-4">

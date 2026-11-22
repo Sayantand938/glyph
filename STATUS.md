@@ -1,8 +1,50 @@
-# MCQ Spaced-Repetition PWA — Build Plan
+# Glyph — MCQ Spaced-Repetition PWA — Status & Build Plan
 
 An offline-first, Anki-style MCQ study app. Single-user, no backend, no auth. Data lives in IndexedDB (Dexie); scheduling uses FSRS (`ts-fsrs`); sync between devices is by JSON backup file transfer.
 
-**Stack:** Vite, React, TypeScript (strict), Tailwind CSS, Dexie + `dexie-react-hooks`, `ts-fsrs`, `lucide-react`, `vite-plugin-pwa`, Vitest (dev only).
+**Stack (as built):** Vite 8, React 19, TypeScript (strict), Tailwind CSS v4, shadcn/ui, Dexie + `dexie-react-hooks`, `ts-fsrs`, `lucide-react`, `vite-plugin-pwa`, Vitest (dev only). The project was scaffolded on Next.js and migrated to Vite before Phase 4, so it now matches the plan's stack; see "Deviations".
+
+This file was `PLAN.md`; it is both the plan and the running status. Update the table and checklist at the end of every phase.
+
+---
+
+## Current Status
+
+**Current phase: Phase 4 — Bulk JSON Importer (next up).** Phases 1–3 are done and verified, and the Next.js → Vite migration is complete.
+
+| Phase | Scope | State |
+|---|---|---|
+| 1 | Project setup (PWA manifest, icons, Vitest, base layout) | Done |
+| 2 | Data layer (Dexie schema, scheduler, seed, repo) | Done |
+| 3 | Pure utilities (`normalizeAnswer`, `noteId`, `seededShuffle`) | Done |
+| 4 | Bulk JSON importer | **Next** |
+| 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | Not started |
+| 6 | Study session & inline editor | Not started |
+| 7 | PWA offline verification (plugin already configured) | Not started |
+
+### Done
+
+- **Phase 1:** PWA manifest (in `vite.config.ts`), icons in `public/icons/`, `vitest.config.ts`, base layout with dark mode, mobile-first `max-w-3xl` container.
+- **Phase 2:** `src/db/database.ts` (Dexie v1 schema, `initDatabase()` = persist + seed), `types.ts`, `scheduler.ts` (ts-fsrs wrapper, `formatInterval`, `previewIntervals`, `grade`), `seed.ts`, `repo.ts` (decks, `saveNote`, `applyReview`, `undoReview`), `src/components/db-provider.tsx` gating render on startup. Scheduler unit-tested.
+- **Phase 3:** `src/lib/answer.ts`, `src/lib/hash.ts` (`cyrb53`, `normalizeQuestion`, `noteId`), `src/lib/shuffle.ts` (`mulberry32`, `seededShuffle`), each with a `*.test.ts`. 53 tests pass in total; typecheck, lint and build clean.
+
+### Deviations from the plan
+
+- **Migrated from Next.js to Vite** (after Phase 3, before Phase 4). Reason: a fully client-side, offline PWA gains nothing from SSR, Dexie is browser-only, and `vite-plugin-pwa` (in the original plan) makes Phase 7 trivial. Changes: code moved under `src/` (alias `@/*` → `src/`), `index.html` + `src/main.tsx` replace `app/layout.tsx`, the manifest moved into `vite.config.ts`, `next/font` became `@fontsource-variable/jetbrains-mono` (self-hosted, precached), ESLint switched to `typescript-eslint` + react-hooks + react-refresh, and dev runs on port 5173.
+- **Custom theme provider instead of `next-themes`.** `next-themes` renders a `<script>` that React 19 logs as a console error on client renders. `src/components/theme-provider.tsx` + `src/hooks/use-theme.ts` reimplement light/dark/system (same `theme` localStorage key, `d` hotkey) and `index.html` applies the theme before first paint. `next-themes` was removed.
+- **Removed `scripts/generate-icons.mjs`.** It depended on `next/og`. The generated PNGs in `public/icons/` are committed and still used; they are placeholders to replace with real art.
+- **`@vitejs/plugin-react` installed with `--legacy-peer-deps`** (optional Babel peer clashes with shadcn's Babel 7). `@eslint/js` pinned to `^9` to match ESLint 9.
+- **No service-worker registration code yet.** `vite-plugin-pwa` is configured (`registerType: 'autoUpdate'`, precache for js/css/html/svg/png/ico/woff2) and generates `dist/sw.js`, but the optional "Update available / Ready offline" toast (`virtual:pwa-register`) is still to do in Phase 7.
+- **Phase 3 scope.** Plan §4.4 (`buildQueue`) and §4.5 (backup merge) only point forward to Phases 5/6, so they are built with their phases, not here. Phase 3 delivered the three standalone utilities.
+- **Component paths.** Components in the layout below are `src/components/<name>.tsx` in kebab-case (e.g. `db-provider.tsx`), matching the shadcn convention.
+- `noteId` also exports `normalizeQuestion`, and `src/lib/hash.ts` exports `cyrb53`, because the shuffle seeds from the same hash.
+
+### Next steps (Phase 4)
+
+1. `src/lib/importer.ts`: `validateRows()`, `planImport()` (pure, tested), `commitImport()` (single Dexie transaction, `bulkPut`/`bulkAdd`).
+2. `src/components/import-modal.tsx`: file pick + drag-and-drop, target Subject/Topic selection with case-insensitive name reuse, preview counts, invalid-row list, commit.
+3. A temporary entry point on the home page to open the modal (the real dashboard is Phase 5).
+4. Tests for validation, plan counts, and idempotent re-import (0 new / 0 updated).
 
 ---
 

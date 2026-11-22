@@ -15,7 +15,8 @@ export class GlyphDB extends Dexie {
     this.version(1).stores({
       decks: "id, parentId, deletedAt",
       notes: "id, topicId, deletedAt",
-      cards: "cardId, noteId, topicId, state, due, [topicId+state], [topicId+due]",
+      cards:
+        "cardId, noteId, topicId, state, due, [topicId+state], [topicId+due]",
       revlog: "id, cardId, reviewedAt",
     })
   }
