@@ -45,7 +45,7 @@ type Phase =
   | { kind: "question" }
   /** Picked a wrong option; the Again review is already saved. */
   | { kind: "wrong"; picked: OptionIndex }
-  /** Picked the right option; waiting for Hard/Good/Easy. Nothing saved yet. */
+  /** Picked the right option; waiting for Pass/Fail. Nothing saved yet. */
   | { kind: "right"; picked: OptionIndex; pickedAt: number }
 
 /** A saved review plus what is needed to take it back. */
@@ -250,9 +250,11 @@ export function StudySession({
     try {
       const durationMs = currentTime() - shownAt.current
       const { log } = await applyReview(view.card, rating, durationMs)
+      const failed = rating === Rating.Again
+      const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {
         cardId: view.card.cardId,
-        correct: true,
+        correct: !failed,
         durationMs,
         logId: log.id,
         previousRow: view.card,
@@ -265,6 +267,7 @@ export function StudySession({
         (r) =>
           r && {
             ...r,
+            queue: failed ? requeueAgain(r.queue, r.index, gap) : r.queue,
             index: r.index + 1,
             phase: { kind: "question" },
             history: [...r.history, entry],
@@ -351,9 +354,9 @@ export function StudySession({
     } else if (run.phase.kind === "wrong") {
       if (confirmKey) next()
       else handled = false
-    } else if (confirmKey || key === "2") void gradeRight(Rating.Good)
-    else if (key === "1") void gradeRight(Rating.Hard)
-    else if (key === "3") void gradeRight(Rating.Easy)
+    } else if (confirmKey || key === "p" || key === "1") {
+      void gradeRight(Rating.Good)
+    } else if (key === "f" || key === "2") void gradeRight(Rating.Again)
     else handled = false
 
     if (handled) {
@@ -406,7 +409,7 @@ export function StudySession({
       ? "1-4 or A-D pick, E edit, Z undo, Esc exit"
       : run.phase.kind === "wrong"
         ? "Space next, E edit, Z undo, Esc exit"
-        : "Space good, 1 hard, 2 good, 3 easy, E edit, Z undo"
+        : "Space or P pass, F fail, E edit, Z undo"
 
   return (
     <div className="flex flex-1 flex-col gap-4 py-4">
@@ -462,7 +465,7 @@ export function StudySession({
         <span
           className="flex size-8 items-center justify-center text-muted-foreground"
           title={
-            "Keyboard\nQuestion: 1-4 / A-D pick, E edit, Esc exit\nAfter wrong: Space next\nAfter right: Space good, 1 hard, 2 good, 3 easy\nAny time: Z undo"
+            "Keyboard\nQuestion: 1-4 / A-D pick, E edit, Esc exit\nAfter wrong: Space next\nAfter right: Space/P/1 pass, F/2 fail\nAny time: Z undo"
           }
         >
           <KeyboardIcon className="size-4" aria-label="Keyboard shortcuts" />
@@ -556,16 +559,16 @@ export function StudySession({
           )}
 
           {run.phase.kind === "right" && intervals && (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="outline"
                 size="lg"
                 className="h-auto flex-col gap-0 py-2"
-                onClick={() => void gradeRight(Rating.Hard)}
+                onClick={() => void gradeRight(Rating.Again)}
               >
-                <span>Hard</span>
+                <span>Fail</span>
                 <span className="text-xs text-muted-foreground">
-                  {intervals.hard} &middot; 1
+                  {intervals.again} &middot; F
                 </span>
               </Button>
               <Button
@@ -573,20 +576,9 @@ export function StudySession({
                 className="h-auto flex-col gap-0 py-2"
                 onClick={() => void gradeRight(Rating.Good)}
               >
-                <span>Good</span>
+                <span>Pass</span>
                 <span className="text-xs opacity-80">
-                  {intervals.good} &middot; 2
-                </span>
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="h-auto flex-col gap-0 py-2"
-                onClick={() => void gradeRight(Rating.Easy)}
-              >
-                <span>Easy</span>
-                <span className="text-xs text-muted-foreground">
-                  {intervals.easy} &middot; 3
+                  {intervals.good} &middot; P
                 </span>
               </Button>
             </div>

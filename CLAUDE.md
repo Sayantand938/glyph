@@ -55,6 +55,7 @@ Tests sit next to the code as `*.test.ts`.
 8. No new dependencies beyond the stack above without a stated reason.
 9. Components that query Dexie render under `DbProvider`, which runs `initDatabase()` (persist + seed) first.
 10. Question/option text is rendered as plain text (React escapes it). Never `dangerouslySetInnerHTML`.
+11. Two-grade scale only: reviews are `Again` (fail) or `Good` (pass), the `Grade` type in `scheduler.ts`. Never add Hard/Easy buttons or write ratings 2/4 (old logs and imported backups may contain them; keep accepting those).
 
 ## Gotchas
 

@@ -1,6 +1,11 @@
 /**
  * The only module that talks to ts-fsrs. UI code imports `Rating`, `State`
  * and the helpers from here, never from "ts-fsrs" directly.
+ *
+ * Glyph uses a two-grade scale: `Again` (fail) and `Good` (pass). FSRS is at
+ * least as accurate with two buttons as with four, so `Grade` is narrowed to
+ * those two and nothing can schedule a card with Hard or Easy. Old review logs
+ * may still hold ratings 2 and 4 (see `RevlogRow`); they are only ever read.
  */
 import {
   createEmptyCard,
@@ -9,13 +14,14 @@ import {
   Rating,
   State,
   type Card,
-  type Grade,
 } from "ts-fsrs"
 
 import type { CardRow, Note, RevlogRow } from "./types"
 
 export { Rating, State }
-export type { Grade }
+
+/** The only ratings Glyph produces: fail or pass. */
+export type Grade = Rating.Again | Rating.Good
 
 const scheduler = fsrs(generatorParameters({ enable_fuzz: true }))
 
@@ -103,10 +109,10 @@ export function cardToRow(
 }
 
 export interface IntervalPreview {
+  /** Next interval if the card is failed. */
   again: string
-  hard: string
+  /** Next interval if the card is passed. */
   good: string
-  easy: string
 }
 
 export function previewIntervals(row: CardRow, now: number): IntervalPreview {
@@ -115,9 +121,7 @@ export function previewIntervals(row: CardRow, now: number): IntervalPreview {
     formatInterval(preview[grade].card.due.getTime() - now)
   return {
     again: label(Rating.Again),
-    hard: label(Rating.Hard),
     good: label(Rating.Good),
-    easy: label(Rating.Easy),
   }
 }
 

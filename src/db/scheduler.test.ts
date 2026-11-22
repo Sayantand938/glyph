@@ -81,8 +81,16 @@ describe("grade", () => {
   it("does not mutate the input row", () => {
     const row = emptyCardRow(note, NOW)
     const snapshot = { ...row }
-    grade(row, Rating.Easy, NOW)
+    grade(row, Rating.Good, NOW)
     expect(row).toEqual(snapshot)
+  })
+
+  it("only accepts the two-grade scale (Again/Good) at compile time", () => {
+    const row = emptyCardRow(note, NOW)
+    // @ts-expect-error Hard is not a Glyph grade
+    void (() => grade(row, Rating.Hard, NOW))
+    // @ts-expect-error Easy is not a Glyph grade
+    void (() => grade(row, Rating.Easy, NOW))
   })
 
   it("keeps a reviewed card lossless through a round trip", () => {
@@ -92,19 +100,21 @@ describe("grade", () => {
 })
 
 describe("previewIntervals", () => {
-  it("returns a label for every rating, ordered by length on a new card", () => {
+  it("returns only a fail and a pass label, pass being longer on a new card", () => {
     const p = previewIntervals(emptyCardRow(note, NOW), NOW)
+    expect(Object.keys(p).sort()).toEqual(["again", "good"])
     expect(p.again).toBe("1m")
     expect(p.good).toBe("10m")
-    for (const label of [p.again, p.hard, p.good, p.easy]) {
+    for (const label of [p.again, p.good]) {
       expect(label).toMatch(/^(<1m|[\d.]+(m|h|d|mo|y))$/)
     }
   })
 
   it("gives longer intervals for a mature review card", () => {
-    const { row } = grade(emptyCardRow(note, NOW), Rating.Easy, NOW)
-    const later = row.due
-    const p = previewIntervals(row, later)
+    // Pass until the card graduates out of the learning steps.
+    let row = emptyCardRow(note, NOW)
+    for (let i = 0; i < 3; i++) row = grade(row, Rating.Good, row.due).row
+    const p = previewIntervals(row, row.due)
     expect(p.good).toMatch(/d|mo|y/)
   })
 })

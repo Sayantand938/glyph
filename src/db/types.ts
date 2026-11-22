@@ -49,7 +49,11 @@ export interface RevlogRow {
   id: string
   cardId: string
   reviewedAt: number
-  /** ts-fsrs Rating enum value (1 Again, 2 Hard, 3 Good, 4 Easy). */
+  /**
+   * ts-fsrs Rating enum value. The app only writes 1 (Again, fail) and 3
+   * (Good, pass); 2 (Hard) and 4 (Easy) can exist in older logs and imported
+   * backups, and are still accepted.
+   */
   rating: number
   /** State BEFORE the review. */
   state: number
