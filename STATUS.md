@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: Phase 5 — Dashboard & Backup (next up).** Phases 1–4 are done and verified, and the Next.js → Vite migration is complete.
+**Current phase: Phase 6 — Study Session & Inline Editor (next up).** Phases 1–5 are done and verified, and the Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -18,8 +18,8 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 | 2 | Data layer (Dexie schema, scheduler, seed, repo) | Done |
 | 3 | Pure utilities (`normalizeAnswer`, `noteId`, `seededShuffle`) | Done |
 | 4 | Bulk JSON importer | Done |
-| 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | **Next** |
-| 6 | Study session & inline editor | Not started |
+| 5 | Dashboard & backup (includes `buildQueue`, `mergeBackup`) | Done |
+| 6 | Study session & inline editor | **Next** |
 | 7 | PWA offline verification (plugin already configured) | Not started |
 
 ### Done
@@ -28,6 +28,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - **Phase 2:** `src/db/database.ts` (Dexie v1 schema, `initDatabase()` = persist + seed), `types.ts`, `scheduler.ts` (ts-fsrs wrapper, `formatInterval`, `previewIntervals`, `grade`), `seed.ts`, `repo.ts` (decks, `saveNote`, `applyReview`, `undoReview`), `src/components/db-provider.tsx` gating render on startup. Scheduler unit-tested.
 - **Phase 3:** `src/lib/answer.ts`, `src/lib/hash.ts` (`cyrb53`, `normalizeQuestion`, `noteId`), `src/lib/shuffle.ts` (`mulberry32`, `seededShuffle`), each with a `*.test.ts`. 53 tests pass in total; typecheck, lint and build clean.
 - **Phase 4:** `src/lib/importer.ts` (`parseImportText`, `validateRows`, `planImport`, `resolveDeckRef`, `summarize`, `formatSummary`; pure), `commitImport()` in `src/db/repo.ts` (one transaction: resolve/create Subject + Topic, re-plan against stored notes, `bulkPut` notes, `bulkAdd` cards for new notes only), `src/components/import-modal.tsx` + `src/components/ui/dialog.tsx` (base-ui Dialog), and a temporary "Import JSON" button and result banner in `App.tsx`. 30 new tests (83 total). Verified in the browser: import, idempotent re-import (0 new / 9 unchanged / 1 updated), card progress preserved, case-insensitive Subject/Topic reuse, invalid-file errors, 375px layout.
+- **Phase 5:** `src/lib/queue.ts` (`buildQueue`, `countCards`, `capNew`, `studyDayStart`, `countNewIntroduced`, `remainingNew`) and `src/lib/backup.ts` (`exportBackup`, `parseBackup`, pure `mergeBackup`, `formatMergeSummary`, `backupFilename`), 42 new tests (125 total). `src/db/queries.ts` (read-only: `loadDashboard`, `readAllData`) and `importBackup()` in `repo.ts` (one transaction over all four tables, writes only changed rows). UI: `dashboard.tsx`, `deck-tree.tsx`, `deck-dialogs.tsx` (rename / soft-delete with confirm), `header-menu.tsx`, `ui/dropdown-menu.tsx`, `hooks/use-backup-controls.tsx`, `hooks/use-stored-state.ts`; `App.tsx` is now the real shell. Verified in the browser: dashboard counts, collapse state, rename validation, header menu, backup export/parse/merge round trip (no-op re-import), older backup over newer progress keeps the newer rows, and a review/undo moves "new today" 0 -> 1 -> 0. Not exercised in the browser: the actual file download and file-picker import (the same code paths were run from the page without the file dialogs), and the delete dialog's confirm button.
 
 ### Deviations from the plan
 
@@ -49,11 +50,23 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 - Importer rows accept numeric `sl`/options/answer; the key is `questions` (plural), as in the plan.
 - The 10 MB cap is checked before reading the file. The commit is not chunked (a single `bulkPut`/`bulkAdd`), which is fine for the few-thousand-row target.
 
-### Next steps (Phase 5)
+### Phase 5 notes
 
-1. `src/lib/queue.ts` (`buildQueue`) and `src/lib/backup.ts` (`exportBackup`, `parseBackup`, pure `mergeBackup`) with tests.
-2. Dashboard + deck tree with per-topic New / Learning / Due counts, replacing the temporary Import button in `App.tsx`.
-3. Header menu: Import JSON, Export Backup, Import Backup.
+- **Study button is a stub.** The dashboard computes the remaining daily new-card allowance and passes `(scope, remainingNew)` to `onStudy`; until Phase 6 `App.tsx` just shows a notice. Phase 6 should call `buildQueue` (Topic: `mixed: false`; Subject: `mixed: true`) with cards read from `db.cards` (non-tombstoned notes only, like `loadDashboard`).
+- **Counts use the `topicId` index plus pure `countCards`**, not the `[topicId+state]` / `[topicId+due]` compound indexes the plan mentions (a topic's cards are loaded once and counted in JS; dead notes are excluded via the `deletedAt` index). The compound indexes are still defined for Phase 6.
+- **Learning count = Learning/Relearning cards due now.** The dashboard re-reads every 60 s so cards that become due (and the 04:00 rollover) appear without a reload. A non-due learning card is in neither the count nor the queue.
+- **Daily new limit:** `glyph.newLimit` in localStorage (default 20), editable on the dashboard. "Introduced today" = distinct cards whose first-ever revlog entry is on/after the 04:00 day start (a card whose FSRS was reset and re-reviewed does not count again). Each row's New is `min(raw, remaining)`; a Subject sums raw New across its topics, then caps.
+- **Queue shuffling:** Topic = learning (most overdue first), then shuffled reviews, then shuffled new; Subject = learning first, then reviews and new blended in one shuffle. When more new cards exist than the allowance, the oldest (by creation `due`) are chosen.
+- **Backup parsing is strict:** every row of every table is validated and copied field-by-field (unknown fields are dropped); one bad row rejects the file with its table and index. 100 MB cap.
+- **Merge details:** deck ties prefer a tombstone, then local; two tombstoned notes pick newer content then newer `deletedAt`; revlog is local-wins by id; a card follows its winning note's `topicId`. Incoming cards with no note in the merged set are dropped and reported. After merging, `importBackup` gives any live note that has no card a fresh one. As specified, a card reset to New (lastReview 0) loses to an older reviewed copy of the same card from another device.
+- **Header menu:** three buttons from the `sm` breakpoint up, a single menu below it. The collapsed-Subjects set is stored in `glyph.collapsed`.
+- **Vite dev gotcha:** adding a new `@base-ui/react/*` entry point made the dev server re-optimize deps and load two copies of React ("Invalid hook call", blank page). Stopping the server and deleting `node_modules/.vite` fixed it.
+
+### Next steps (Phase 6)
+
+1. `StudySession.tsx`: build the queue once with `buildQueue`, option shuffle via `seededShuffle`, answer flow with `applyReview` / `undoReview`, keyboard map, re-queue on Again.
+2. `EditNoteModal.tsx` using `saveNote()`, including the "Reset FSRS progress" option.
+3. Wire `onStudy` in `App.tsx` to open the session, replacing the notice stub.
 
 ---
 

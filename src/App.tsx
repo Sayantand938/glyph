@@ -1,14 +1,15 @@
 import * as React from "react"
-import { UploadIcon } from "lucide-react"
 
+import { Dashboard } from "@/components/dashboard"
+import { HeaderMenu } from "@/components/header-menu"
 import { ImportModal } from "@/components/import-modal"
-import { Button } from "@/components/ui/button"
+import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { formatSummary } from "@/lib/importer"
 
-// Temporary shell: the real dashboard arrives in Phase 5.
 export default function App() {
   const [importOpen, setImportOpen] = React.useState(false)
-  const [notice, setNotice] = React.useState<string | null>(null)
+  const [notice, setNotice] = React.useState<Notice | null>(null)
+  const backup = useBackupControls(setNotice)
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-3xl flex-col px-4 sm:px-6">
@@ -16,33 +17,43 @@ export default function App() {
         <h1 className="text-base font-semibold tracking-tight">
           glyph<span className="animate-pulse">_</span>
         </h1>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setImportOpen(true)}
-          >
-            <UploadIcon data-icon="inline-start" />
-            Import JSON
-          </Button>
-          <span className="text-xs text-muted-foreground">v0.0.1</span>
-        </div>
+        <HeaderMenu
+          busy={backup.busy}
+          onImportJson={() => setImportOpen(true)}
+          onExportBackup={() => void backup.exportFile()}
+          onImportBackup={backup.chooseFile}
+        />
+        {backup.input}
       </header>
 
-      <main className="flex flex-1 flex-col justify-center gap-3 py-16">
+      <main className="flex flex-1 flex-col">
         {notice && (
-          <p role="status" className="rounded-lg border p-3 text-sm">
-            {notice}
-          </p>
+          <div
+            role={notice.tone === "error" ? "alert" : "status"}
+            className="mt-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
+          >
+            <p>{notice.text}</p>
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="shrink-0 text-xs text-muted-foreground underline underline-offset-2"
+            >
+              Dismiss
+            </button>
+          </div>
         )}
-        <p className="text-2xl font-semibold tracking-tight">
-          spaced repetition
-          <br />
-          for multiple choice.
-        </p>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Offline-first. Local data. No accounts.
-        </p>
+
+        <Dashboard
+          onImportJson={() => setImportOpen(true)}
+          onImportBackup={backup.chooseFile}
+          // The study session arrives in Phase 6.
+          onStudy={(scope) =>
+            setNotice({
+              text: `Study sessions arrive in Phase 6 (${scope.name}).`,
+              tone: "info",
+            })
+          }
+        />
       </main>
 
       <footer className="border-t py-4 text-xs text-muted-foreground">
@@ -52,7 +63,9 @@ export default function App() {
       <ImportModal
         open={importOpen}
         onOpenChange={setImportOpen}
-        onImported={(summary) => setNotice(formatSummary(summary))}
+        onImported={(summary) =>
+          setNotice({ text: formatSummary(summary), tone: "info" })
+        }
       />
     </div>
   )

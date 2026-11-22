@@ -1,0 +1,113 @@
+/** Read-only queries. Writes live in repo.ts. Call these from `useLiveQuery`. */
+import type { BackupData } from "@/lib/backup"
+import {
+  ZERO_COUNTS,
+  countCards,
+  countNewIntroduced,
+  type DeckCounts,
+} from "@/lib/queue"
+
+import { db } from "./database"
+import type { Deck } from "./types"
+
+export interface DashboardData {
+  /** Live Subjects, sorted by name. */
+  subjects: Deck[]
+  /** Live Topics by Subject id, sorted by name. Topics of deleted Subjects are left out. */
+  topics: Map<string, Deck[]>
+  /** Raw (uncapped) counts by Topic id. */
+  counts: Map<string, DeckCounts>
+  /** New cards introduced since `dayStart`. */
+  introducedToday: number
+}
+
+function byName(a: Deck, b: Deck): number {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+}
+
+/**
+ * Everything the dashboard shows. Counts only include cards of live notes in
+ * live Topics under live Subjects (a card is not tombstoned with its note).
+ */
+export async function loadDashboard(
+  now: number,
+  dayStart: number
+): Promise<DashboardData> {
+  return db.transaction(
+    "r",
+    [db.decks, db.notes, db.cards, db.revlog],
+    async () => {
+      const decks = (await db.decks.toArray()).filter(
+        (d) => d.deletedAt === null
+      )
+      const subjects = decks.filter((d) => d.parentId === null).sort(byName)
+      const subjectIds = new Set(subjects.map((s) => s.id))
+
+      const topics = new Map<string, Deck[]>(subjects.map((s) => [s.id, []]))
+      for (const deck of decks) {
+        if (deck.parentId !== null && subjectIds.has(deck.parentId)) {
+          topics.get(deck.parentId)?.push(deck)
+        }
+      }
+      for (const list of topics.values()) list.sort(byName)
+
+      // Only tombstones carry a numeric deletedAt, so this index lookup is small.
+      const deadNotes = new Set(
+        await db.notes.where("deletedAt").above(0).primaryKeys()
+      )
+      const topicIds = [...topics.values()].flat().map((t) => t.id)
+      const cards = await db.cards.where("topicId").anyOf(topicIds).toArray()
+
+      const byTopic = new Map<string, typeof cards>()
+      for (const card of cards) {
+        if (deadNotes.has(card.noteId)) continue
+        const list = byTopic.get(card.topicId)
+        if (list) list.push(card)
+        else byTopic.set(card.topicId, [card])
+      }
+      const counts = new Map<string, DeckCounts>()
+      for (const id of topicIds) {
+        const list = byTopic.get(id)
+        counts.set(id, list ? countCards(list, now) : ZERO_COUNTS)
+      }
+
+      return {
+        subjects,
+        topics,
+        counts,
+        introducedToday: await introducedSince(dayStart),
+      }
+    }
+  )
+}
+
+/** New cards introduced since `dayStart`: first-ever review falls on or after it. */
+async function introducedSince(dayStart: number): Promise<number> {
+  const today = await db.revlog
+    .where("reviewedAt")
+    .aboveOrEqual(dayStart)
+    .toArray()
+  if (today.length === 0) return 0
+
+  const ids = [...new Set(today.map((log) => log.cardId))]
+  const earlier = await db.revlog
+    .where("cardId")
+    .anyOf(ids)
+    .and((log) => log.reviewedAt < dayStart)
+    .toArray()
+  return countNewIntroduced(today, new Set(earlier.map((log) => log.cardId)))
+}
+
+/** Every row of every table, read in one snapshot, for export and merging. */
+export async function readAllData(): Promise<BackupData> {
+  return db.transaction(
+    "r",
+    [db.decks, db.notes, db.cards, db.revlog],
+    async () => ({
+      decks: await db.decks.toArray(),
+      notes: await db.notes.toArray(),
+      cards: await db.cards.toArray(),
+      revlog: await db.revlog.toArray(),
+    })
+  )
+}

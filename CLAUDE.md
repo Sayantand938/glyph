@@ -35,8 +35,8 @@ src/main.tsx        mounts <ThemeProvider><DbProvider><App/>
 src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn)
-src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo.ts
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle (+ queue, backup, importer later)
+src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo.ts (writes), queries.ts (reads)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer, queue, backup
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```
@@ -59,7 +59,7 @@ Tests sit next to the code as `*.test.ts`.
 ## Gotchas
 
 - `ts-fsrs` is 5.x: `elapsed_days` is deprecated but still on `Card`; check the installed types rather than guessing the API.
-- Keep source files ASCII: write non-ASCII characters (zero-width, combining marks) as `\uXXXX` escapes so tooling can't silently change or hide them.
+- Keep source files ASCII: write non-ASCII characters (zero-width, combining marks) as `\uXXXX` escapes so tooling can't silently change or hide them. `src/ascii.test.ts` enforces this in `npm test`. Claude's Write/Edit tools turn a typed escape into the literal character, so put escapes in via `sed` or Python from Bash (sed needs the backslash doubled twice), or avoid them (e.g. `&middot;` in JSX text), then re-run the test.
 - `@vitejs/plugin-react@6` has an optional Babel peer that conflicts with shadcn's Babel 7 under npm's resolver; it was installed with `--legacy-peer-deps`. Use the same flag if `npm install` reports an ERESOLVE for it.
 - `@eslint/js` is pinned to `^9` to match `eslint@9`.
 - Theming is a small custom provider (`src/components/theme-provider.tsx`, `src/hooks/use-theme.ts`), not `next-themes`, which renders a `<script>` that React 19 logs as an error. The `d` key toggles light/dark.

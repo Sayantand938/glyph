@@ -1,4 +1,5 @@
 /** All writes go through here, each in a single Dexie transaction. */
+import { mergeBackup, type MergeStats } from "@/lib/backup"
 import {
   deckNameKey,
   planImport,
@@ -10,7 +11,7 @@ import {
 
 import { db } from "./database"
 import { emptyCardRow, grade, type Grade } from "./scheduler"
-import type { CardRow, Deck, Note, RevlogRow } from "./types"
+import type { BackupFile, CardRow, Deck, Note, RevlogRow } from "./types"
 
 function cleanName(name: string): string {
   const trimmed = name.trim()
@@ -240,4 +241,39 @@ export async function commitImport(
 
     return summarize(plan, invalidCount)
   })
+}
+
+/**
+ * Merges a parsed backup into the database in one transaction (see
+ * `mergeBackup` for the rules) and writes only the rows that changed. A live
+ * note that ends up without a card gets a fresh one, so nothing is unstudyable.
+ */
+export async function importBackup(
+  incoming: Pick<BackupFile, "decks" | "notes" | "cards" | "revlog">,
+  now = Date.now()
+): Promise<MergeStats> {
+  return db.transaction(
+    "rw",
+    [db.decks, db.notes, db.cards, db.revlog],
+    async () => {
+      const local = {
+        decks: await db.decks.toArray(),
+        notes: await db.notes.toArray(),
+        cards: await db.cards.toArray(),
+        revlog: await db.revlog.toArray(),
+      }
+      const { merged, write, stats } = mergeBackup(local, incoming)
+
+      const haveCard = new Set(merged.cards.map((c) => c.cardId))
+      const repaired = merged.notes
+        .filter((n) => n.deletedAt === null && !haveCard.has(n.id))
+        .map((n) => emptyCardRow(n, now))
+
+      await db.decks.bulkPut(write.decks)
+      await db.notes.bulkPut(write.notes)
+      await db.cards.bulkPut([...write.cards, ...repaired])
+      await db.revlog.bulkPut(write.revlog)
+      return stats
+    }
+  )
 }
