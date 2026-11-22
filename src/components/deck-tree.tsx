@@ -18,7 +18,6 @@ import type { Deck } from "@/db/types"
 import {
   ZERO_COUNTS,
   addCounts,
-  capNew,
   totalCount,
   type DeckCounts,
 } from "@/lib/queue"
@@ -129,7 +128,6 @@ function DeckRow({
 
 export function DeckTree({
   data,
-  remainingNew,
   collapsed,
   onToggle,
   onStudy,
@@ -137,8 +135,6 @@ export function DeckTree({
   onDelete,
 }: {
   data: DashboardData
-  /** New cards still allowed today; every row's New count is capped by it. */
-  remainingNew: number
   collapsed: ReadonlySet<string>
   onToggle: (subjectId: string) => void
   onStudy: (scope: StudyScope) => void
@@ -173,7 +169,7 @@ export function DeckTree({
           <div key={subject.id} className="border-b last:border-b-0">
             <DeckRow
               deck={subject}
-              counts={capNew(subjectCounts, remainingNew)}
+              counts={subjectCounts}
               scope={{ kind: "subject", id: subject.id, name: subject.name }}
               expanded={isOpen}
               onToggle={() => onToggle(subject.id)}
@@ -191,7 +187,7 @@ export function DeckTree({
                   <DeckRow
                     key={topic.id}
                     deck={topic}
-                    counts={capNew(topicCounts(topic.id), remainingNew)}
+                    counts={topicCounts(topic.id)}
                     scope={{ kind: "topic", id: topic.id, name: topic.name }}
                     onStudy={onStudy}
                     onRename={onRename}

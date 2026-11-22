@@ -99,12 +99,9 @@ function dropFocus() {
 
 export function StudySession({
   scope,
-  newLimit,
   onExit,
 }: {
   scope: StudyScope
-  /** New cards still allowed today. */
-  newLimit: number
   onExit: () => void
 }) {
   const [seed] = React.useState(() => crypto.randomUUID())
@@ -130,7 +127,6 @@ export function StudySession({
         const queue = buildQueue({
           cards,
           now: currentTime(),
-          newLimit,
           seed,
           mixed: scope.kind === "subject",
         })
@@ -143,7 +139,7 @@ export function StudySession({
     return () => {
       cancelled = true
     }
-  }, [scope, newLimit, seed])
+  }, [scope, seed])
 
   const cardId =
     run && run.index < run.queue.length ? run.queue[run.index] : null

@@ -12,10 +12,7 @@ import { formatSummary } from "@/lib/importer"
 export default function App() {
   const [importOpen, setImportOpen] = React.useState(false)
   const [notice, setNotice] = React.useState<Notice | null>(null)
-  const [studying, setStudying] = React.useState<{
-    scope: StudyScope
-    newLimit: number
-  } | null>(null)
+  const [studying, setStudying] = React.useState<StudyScope | null>(null)
   const backup = useBackupControls(setNotice)
 
   return (
@@ -53,18 +50,14 @@ export default function App() {
         )}
 
         {studying ? (
-          <StudySession
-            scope={studying.scope}
-            newLimit={studying.newLimit}
-            onExit={() => setStudying(null)}
-          />
+          <StudySession scope={studying} onExit={() => setStudying(null)} />
         ) : (
           <Dashboard
             onImportJson={() => setImportOpen(true)}
             onImportBackup={backup.chooseFile}
-            onStudy={(scope, newLimit) => {
+            onStudy={(scope) => {
               setNotice(null)
-              setStudying({ scope, newLimit })
+              setStudying(scope)
             }}
           />
         )}

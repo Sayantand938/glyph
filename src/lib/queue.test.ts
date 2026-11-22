@@ -9,11 +9,7 @@ import {
   CARD_REVIEW,
   addCounts,
   buildQueue,
-  capNew,
   countCards,
-  countNewIntroduced,
-  remainingNew,
-  studyDayStart,
   totalCount,
   type QueueCard,
 } from "./queue"
@@ -58,56 +54,13 @@ describe("countCards", () => {
 })
 
 describe("count helpers", () => {
-  it("adds, caps and totals", () => {
+  it("adds and totals", () => {
     const sum = addCounts(
       { new: 3, learning: 1, due: 2 },
       { new: 4, learning: 0, due: 5 }
     )
     expect(sum).toEqual({ new: 7, learning: 1, due: 7 })
-    expect(capNew(sum, 5)).toEqual({ new: 5, learning: 1, due: 7 })
-    expect(capNew(sum, 50).new).toBe(7)
-    expect(capNew(sum, -3).new).toBe(0)
     expect(totalCount(sum)).toBe(15)
-  })
-})
-
-describe("studyDayStart", () => {
-  it("rolls over at 04:00 local time", () => {
-    const at = (d: number, h: number, m = 0) =>
-      new Date(2026, 5, d, h, m).getTime()
-    expect(studyDayStart(at(10, 4, 0))).toBe(at(10, 4))
-    expect(studyDayStart(at(10, 15, 30))).toBe(at(10, 4))
-    expect(studyDayStart(at(10, 3, 59))).toBe(at(9, 4))
-    expect(studyDayStart(at(10, 0, 5))).toBe(at(9, 4))
-  })
-
-  it("handles month boundaries", () => {
-    const now = new Date(2026, 6, 1, 2, 0).getTime()
-    expect(studyDayStart(now)).toBe(new Date(2026, 5, 30, 4, 0).getTime())
-  })
-})
-
-describe("countNewIntroduced", () => {
-  it("counts distinct cards whose first review was today", () => {
-    const today = [{ cardId: "a" }, { cardId: "a" }, { cardId: "b" }]
-    expect(countNewIntroduced(today, new Set())).toBe(2)
-  })
-
-  it("ignores cards reviewed before today", () => {
-    const today = [{ cardId: "a" }, { cardId: "b" }, { cardId: "c" }]
-    expect(countNewIntroduced(today, new Set(["a", "c"]))).toBe(1)
-  })
-
-  it("is zero without reviews", () => {
-    expect(countNewIntroduced([], new Set(["a"]))).toBe(0)
-  })
-})
-
-describe("remainingNew", () => {
-  it("subtracts and never goes negative", () => {
-    expect(remainingNew(20, 5)).toBe(15)
-    expect(remainingNew(20, 25)).toBe(0)
-    expect(remainingNew(0, 0)).toBe(0)
   })
 })
 
@@ -125,7 +78,7 @@ describe("buildQueue", () => {
   ]
 
   it("orders learning, then review, then new; skips cards not due", () => {
-    const queue = buildQueue({ cards, now: NOW, newLimit: 20, seed: "s" })
+    const queue = buildQueue({ cards, now: NOW, seed: "s" })
     expect(queue.slice(0, 2)).toEqual(["lrn2", "lrn1"])
     expect(queue.slice(2, 4).sort()).toEqual(["rev1", "rev2"])
     expect(queue.slice(4).sort()).toEqual(["new1", "new2", "new3"])
@@ -133,25 +86,20 @@ describe("buildQueue", () => {
     expect(queue).not.toContain("lrn-future")
   })
 
-  it("limits new cards, taking the oldest first", () => {
-    const queue = buildQueue({ cards, now: NOW, newLimit: 2, seed: "s" })
-    const news = queue.filter((id) => id.startsWith("new"))
-    expect(news.sort()).toEqual(["new1", "new2"])
-  })
-
-  it("includes no new cards at limit 0 but keeps reviews", () => {
-    const queue = buildQueue({ cards, now: NOW, newLimit: 0, seed: "s" })
-    expect(queue.some((id) => id.startsWith("new"))).toBe(false)
-    expect(queue).toHaveLength(4)
+  it("includes every new card, however many there are", () => {
+    const many = Array.from({ length: 500 }, (_, i) =>
+      card(`n${i}`, CARD_NEW, i)
+    )
+    expect(buildQueue({ cards: many, now: NOW, seed: "s" })).toHaveLength(500)
   })
 
   it("is stable for the same seed and varies with it", () => {
     const many = Array.from({ length: 40 }, (_, i) =>
       card(`n${i}`, CARD_NEW, i)
     )
-    const a = buildQueue({ cards: many, now: NOW, newLimit: 40, seed: "x" })
-    const b = buildQueue({ cards: many, now: NOW, newLimit: 40, seed: "x" })
-    const c = buildQueue({ cards: many, now: NOW, newLimit: 40, seed: "y" })
+    const a = buildQueue({ cards: many, now: NOW, seed: "x" })
+    const b = buildQueue({ cards: many, now: NOW, seed: "x" })
+    const c = buildQueue({ cards: many, now: NOW, seed: "y" })
     expect(a).toEqual(b)
     expect(a).not.toEqual(c)
     expect([...a].sort()).toEqual([...c].sort())
@@ -166,7 +114,6 @@ describe("buildQueue", () => {
     const queue = buildQueue({
       cards: many,
       now: NOW,
-      newLimit: 30,
       seed: "mix",
       mixed: true,
     })
@@ -178,8 +125,6 @@ describe("buildQueue", () => {
   })
 
   it("returns an empty queue when nothing is available", () => {
-    expect(
-      buildQueue({ cards: [], now: NOW, newLimit: 20, seed: "s" })
-    ).toEqual([])
+    expect(buildQueue({ cards: [], now: NOW, seed: "s" })).toEqual([])
   })
 })
