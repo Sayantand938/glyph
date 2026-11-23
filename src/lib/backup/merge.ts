@@ -27,6 +27,7 @@ export function mergeBackup(
     reviewsAdded: 0,
     notesMissingTopic: 0,
     imagesAdded: 0,
+    settingsUpdated: 0,
   }
 
   // decks

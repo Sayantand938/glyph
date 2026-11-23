@@ -65,8 +65,8 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
     () =>
       run(async () => {
         const now = Date.now()
-        const { data, images } = await readBackupSnapshot()
-        const file = exportBackup(data, now, images)
+        const { data, images, settings } = await readBackupSnapshot()
+        const file = exportBackup(data, now, images, settings)
         const filename = backupFilename(now)
         download(filename, serializeBackup(file))
         const pics = images.length > 0 ? `, ${images.length} images` : ""

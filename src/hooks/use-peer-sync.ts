@@ -145,9 +145,9 @@ export function usePeerSync() {
 
     const sendOurs = async (link: Link) => {
       const now = Date.now()
-      const { data, images } = await readBackupSnapshot()
+      const { data, images, settings } = await readBackupSnapshot()
       const bytes = new TextEncoder().encode(
-        serializeBackup(exportBackup(data, now, images))
+        serializeBackup(exportBackup(data, now, images, settings))
       )
       link.send(helloMessage(bytes.length))
       await link.sendChunks(splitChunks(bytes))

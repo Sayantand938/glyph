@@ -1,3 +1,4 @@
+import type { LeechOutcome } from "@/db/repo"
 import type { CardRow } from "@/db/types"
 import type { OptionIndex } from "@/lib/answer"
 import type { CardMarks } from "@/lib/card-marks"
@@ -19,6 +20,8 @@ export interface UndoEntry extends SessionRecord {
   index: number
   /** False once the card's progress was reset by an edit. */
   undoable: boolean
+  /** Set when this review made the card a leech (tagged and maybe suspended). */
+  leech?: LeechOutcome
 }
 
 /** A suspend or bury made in this session, with what is needed to take it back. */

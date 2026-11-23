@@ -4,10 +4,11 @@ export const BACKUP_APP = "mcq-srs"
 /**
  * 2 added `images`; 3 added `tags` on notes; 4 added the card marks (flag,
  * suspended, buriedUntil, markedAt); 5 added the review log's memory state
- * after the review and whether the answer was right. Older files are still accepted (no
- * images, untagged notes, unmarked cards); their review rows are dropped.
+ * after the review and whether the answer was right; 6 added `settings` (retention,
+ * fitted weights, leech rule). Older files are still accepted (no images, untagged
+ * notes, unmarked cards, no settings); before 5 their review rows are dropped.
  */
-export const BACKUP_SCHEMA_VERSION = 5
+export const BACKUP_SCHEMA_VERSION = 6
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024
 
 /** The four tables, without the file envelope. */
@@ -35,6 +36,8 @@ export interface MergeStats {
   notesMissingTopic: number
   /** Images from the backup that this device did not have. Set by the DB layer. */
   imagesAdded: number
+  /** Settings taken from the backup because they were newer. Set by the DB layer. */
+  settingsUpdated: number
 }
 
 export interface MergeResult {

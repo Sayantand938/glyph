@@ -11,6 +11,7 @@ import { SyncPage } from "@/components/sync/sync-page"
 import { StudyOptionsPage } from "@/components/study/study-options-page"
 import { StudySession } from "@/components/study/study-session"
 import { Button } from "@/components/ui/button"
+import { useAutoFit } from "@/hooks/use-auto-fit"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { formatSummary } from "@/lib/importer"
 import type { StudyOptions } from "@/lib/study-options"
@@ -31,6 +32,8 @@ export default function App() {
     scope: StudyScope | null
   } | null>(null)
   const backup = useBackupControls(setNotice)
+  // Refit the FSRS weights between study sessions as reviews pile up.
+  useAutoFit(studying !== null)
 
   return (
     <div

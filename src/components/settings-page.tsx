@@ -21,8 +21,9 @@ import {
   MIN_RETENTION,
 } from "@/db/scheduler"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
-import { useRetention } from "@/hooks/use-retention"
+import { useSetting } from "@/hooks/use-settings"
 import { useTheme, type Theme } from "@/hooks/use-theme"
+import { DEFAULT_LEECH_THRESHOLD, MAX_LEECH_THRESHOLD } from "@/lib/leech"
 import { version } from "../../package.json"
 
 const THEMES: { value: Theme; label: string; icon: React.ReactNode }[] = [
@@ -112,7 +113,12 @@ export function SettingsPage({
 }) {
   const { theme, setTheme } = useTheme()
   useHistoryLayer(onBack)
-  const [retention, setRetention] = useRetention()
+  const [retention, setRetention] = useSetting("retention")
+  const [leechThreshold, setLeechThreshold] = useSetting("leechThreshold")
+  const [leechAction, setLeechAction] = useSetting("leechAction")
+  const [thresholdDraft, setThresholdDraft] = React.useState<string | null>(
+    null
+  )
 
   return (
     <div className="flex flex-col py-4">
@@ -154,7 +160,7 @@ export function SettingsPage({
 
       <Section
         title="Scheduling"
-        description="How likely you want to be to truly remember a card (not just guess it) when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on."
+        description="How likely you want to be to truly remember a card (not just guess it) when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on. These settings sync with your backups and devices."
       >
         <div className="space-y-2 sm:max-w-sm">
           <div className="flex items-center justify-between text-sm">
@@ -185,6 +191,86 @@ export function SettingsPage({
           </Button>
         </div>
         <FsrsOptimizer />
+      </Section>
+
+      <Section
+        title="Leeches"
+        description="A question you keep forgetting is often badly worded, or has a weak wrong option. When a question has been forgotten this many times it is tagged leech, so you can find it in Browse (Leeches) and fix it. This only marks questions; it never limits how many you study."
+      >
+        <div className="space-y-3 sm:max-w-sm">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <label htmlFor="leech-threshold" className="text-muted-foreground">
+              Lapses before a leech
+            </label>
+            <input
+              id="leech-threshold"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_LEECH_THRESHOLD}
+              step={1}
+              className="h-8 w-20 rounded-lg border border-input bg-background px-2.5 text-right font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              // A draft lets the box be emptied while typing; it only saves a
+              // valid whole number.
+              value={thresholdDraft ?? String(leechThreshold)}
+              onChange={(e) => {
+                setThresholdDraft(e.target.value)
+                const n = e.target.valueAsNumber
+                if (
+                  Number.isInteger(n) &&
+                  n >= 0 &&
+                  n <= MAX_LEECH_THRESHOLD
+                ) {
+                  setLeechThreshold(n)
+                }
+              }}
+              onBlur={() => setThresholdDraft(null)}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {leechThreshold === 0
+              ? "Off: no question is marked."
+              : `At ${leechThreshold} lapses, then every ${Math.max(1, Math.floor(leechThreshold / 2))} more.`}
+          </p>
+          <div
+            role="group"
+            aria-label="When a question becomes a leech"
+            className="grid grid-cols-2 gap-2"
+          >
+            <Button
+              variant={leechAction === "tag" ? "default" : "outline"}
+              size="sm"
+              aria-pressed={leechAction === "tag"}
+              disabled={leechThreshold === 0}
+              onClick={() => setLeechAction("tag")}
+            >
+              Tag only
+            </Button>
+            <Button
+              variant={leechAction === "suspend" ? "default" : "outline"}
+              size="sm"
+              aria-pressed={leechAction === "suspend"}
+              disabled={leechThreshold === 0}
+              onClick={() => setLeechAction("suspend")}
+            >
+              Tag and suspend
+            </Button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              leechThreshold === DEFAULT_LEECH_THRESHOLD &&
+              leechAction === "tag"
+            }
+            onClick={() => {
+              setLeechThreshold(DEFAULT_LEECH_THRESHOLD)
+              setLeechAction("tag")
+            }}
+          >
+            Reset to {DEFAULT_LEECH_THRESHOLD} lapses, tag only
+          </Button>
+        </div>
       </Section>
 
       <Section

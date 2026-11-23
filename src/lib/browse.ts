@@ -4,6 +4,7 @@
  */
 import { isHidden, isBuried } from "./card-marks"
 import { imageTokenRegex } from "./image"
+import { hasLeechTag } from "./leech"
 import {
   CARD_LEARNING,
   CARD_NEW,
@@ -164,6 +165,7 @@ export type BrowseFilter =
   | "review"
   | "due"
   | "lapsed"
+  | "leeches"
   | "flagged"
   | "suspended"
   | "buried"
@@ -176,6 +178,7 @@ export const BROWSE_FILTERS: readonly { value: BrowseFilter; label: string }[] =
     { value: "review", label: "Review" },
     { value: "due", label: "Due" },
     { value: "lapsed", label: "Lapsed" },
+    { value: "leeches", label: "Leeches" },
     { value: "flagged", label: "Flagged" },
     { value: "suspended", label: "Suspended" },
     { value: "buried", label: "Buried" },
@@ -217,6 +220,8 @@ function matchesFilter(
       return isDueRow(row, now)
     case "lapsed":
       return row.lapses > 0
+    case "leeches":
+      return hasLeechTag(row.tags)
     case "flagged":
       return row.flag > 0
     case "suspended":
@@ -270,6 +275,7 @@ export function filterCounts(
     review: 0,
     due: 0,
     lapsed: 0,
+    leeches: 0,
     flagged: 0,
     suspended: 0,
     buried: 0,
@@ -280,6 +286,7 @@ export function filterCounts(
     if (row.state === CARD_REVIEW) counts.review += 1
     if (isDueRow(row, now)) counts.due += 1
     if (row.lapses > 0) counts.lapsed += 1
+    if (hasLeechTag(row.tags)) counts.leeches += 1
     if (row.flag > 0) counts.flagged += 1
     if (row.suspended) counts.suspended += 1
     if (isBuried(row, now)) counts.buried += 1

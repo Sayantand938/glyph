@@ -1,5 +1,6 @@
 import { base64ToBytes } from "@/lib/image"
 import { mergeBackup, missingImages, type MergeStats } from "@/lib/backup"
+import { mergeSettings } from "@/lib/settings"
 
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
@@ -13,12 +14,12 @@ import type { BackupFile } from "../types"
  */
 export async function importBackup(
   incoming: Pick<BackupFile, "decks" | "notes" | "cards" | "revlog"> &
-    Partial<Pick<BackupFile, "images">>,
+    Partial<Pick<BackupFile, "images" | "settings">>,
   now = Date.now()
 ): Promise<MergeStats> {
   return db.transaction(
     "rw",
-    [db.decks, db.notes, db.cards, db.revlog, db.images],
+    [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
     async () => {
       const local = {
         decks: await db.decks.toArray(),
@@ -38,6 +39,13 @@ export async function importBackup(
         incoming.images ?? []
       )
 
+      // Settings merge key by key, the newer change winning.
+      const { write: newSettings } = mergeSettings(
+        await db.settings.toArray(),
+        incoming.settings ?? []
+      )
+
+      await db.settings.bulkPut(newSettings)
       await db.decks.bulkPut(write.decks)
       await db.notes.bulkPut(write.notes)
       await db.cards.bulkPut([...write.cards, ...repaired])
@@ -51,7 +59,11 @@ export async function importBackup(
           blob: new Blob([base64ToBytes(image.data)], { type: image.mime }),
         }))
       )
-      return { ...stats, imagesAdded: newImages.length }
+      return {
+        ...stats,
+        imagesAdded: newImages.length,
+        settingsUpdated: newSettings.length,
+      }
     }
   )
 }

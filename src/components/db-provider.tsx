@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { initDatabase } from "@/db/database"
+import { adoptLegacySettings } from "@/db/repo"
 
 /**
  * Runs client-only database startup (persist + seed) and withholds children
@@ -13,7 +14,10 @@ export function DbProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     let cancelled = false
-    initDatabase().then(
+    initDatabase()
+      // Keeping the old per-device settings is best effort; it must not stop startup.
+      .then(() => adoptLegacySettings().catch(() => undefined))
+      .then(
       () => !cancelled && setState("ready"),
       (error: unknown) => {
         console.error("Database failed to start", error)

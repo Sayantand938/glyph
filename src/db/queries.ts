@@ -13,6 +13,7 @@ import type {
   ImageRow,
   Note,
   RevlogRow,
+  SettingRow,
 } from "./types"
 
 /**
@@ -244,10 +245,11 @@ export async function loadImageView(id: string): Promise<ImageView | null> {
 export async function readBackupSnapshot(): Promise<{
   data: BackupData
   images: BackupImage[]
+  settings: SettingRow[]
 }> {
-  const { data, rows } = await db.transaction(
+  const { data, rows, settings } = await db.transaction(
     "r",
-    [db.decks, db.notes, db.cards, db.revlog, db.images],
+    [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
     async () => {
       const data: BackupData = {
         decks: await db.decks.toArray(),
@@ -260,6 +262,7 @@ export async function readBackupSnapshot(): Promise<{
       return {
         data,
         rows: found.filter((row): row is ImageRow => row !== undefined),
+        settings: await db.settings.toArray(),
       }
     }
   )
@@ -274,7 +277,12 @@ export async function readBackupSnapshot(): Promise<{
       data: bytesToBase64(new Uint8Array(await row.blob.arrayBuffer())),
     })
   }
-  return { data, images }
+  return { data, images, settings }
+}
+
+/** How many reviews the log holds; the automatic refit paces itself by this. */
+export async function countReviews(): Promise<number> {
+  return db.revlog.count()
 }
 
 /**

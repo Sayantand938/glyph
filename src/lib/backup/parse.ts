@@ -1,4 +1,5 @@
-import type { BackupImage, RevlogRow } from "@/db/types"
+import type { BackupImage, RevlogRow, SettingRow } from "@/db/types"
+import { readSettingRow } from "@/lib/settings"
 
 import {
   isNum,
@@ -84,6 +85,12 @@ export function parseBackup(text: string): ParseBackupResult {
       ? { ok: true as const, rows: [] as BackupImage[] }
       : readTable("images", data.images, readImage)
   if (!images.ok) return images
+  // Absent before version 6; when present every row must be valid.
+  const settings =
+    data.settings === undefined
+      ? { ok: true as const, rows: [] as SettingRow[] }
+      : readTable("settings", data.settings, readSettingRow)
+  if (!settings.ok) return settings
 
   return {
     ok: true,
@@ -96,6 +103,7 @@ export function parseBackup(text: string): ParseBackupResult {
       cards: cards.rows,
       revlog: revlog.rows,
       images: images.rows,
+      settings: settings.rows,
     },
   }
 }

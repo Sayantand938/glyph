@@ -19,6 +19,13 @@ import {
 
 import { marksOf, type CardMarks } from "@/lib/card-marks"
 import { toStudyClock } from "@/lib/fsrs/days"
+import {
+  clampRetention,
+  DEFAULT_RETENTION,
+  MAX_RETENTION,
+  MIN_RETENTION,
+  parseRetention,
+} from "@/lib/retention"
 
 import type { CardRow, Note, RevlogRow } from "./types"
 
@@ -27,23 +34,14 @@ export { Rating, State }
 /** The only ratings Glyph produces: fail or pass. */
 export type Grade = Rating.Again | Rating.Good
 
-/** Target probability of recalling a card on the day it is due. */
-export const DEFAULT_RETENTION = 0.85
-export const MIN_RETENTION = 0.7
-export const MAX_RETENTION = 0.97
-
-/** Clamps to the supported range and rounds to a whole percent. */
-export function clampRetention(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_RETENTION
-  const percent = Math.round(value * 100)
-  return Math.min(MAX_RETENTION, Math.max(MIN_RETENTION, percent / 100))
-}
-
-/** Reads a stored retention, or null if it isn't a usable number. */
-export function parseRetention(stored: unknown): number | null {
-  return typeof stored === "number" && Number.isFinite(stored)
-    ? clampRetention(stored)
-    : null
+// The retention range and parsing live in lib/retention.ts (the synced settings
+// validate it too); they are re-exported here for the scheduler's callers.
+export {
+  clampRetention,
+  DEFAULT_RETENTION,
+  MAX_RETENTION,
+  MIN_RETENTION,
+  parseRetention,
 }
 
 /** Fitted FSRS weights (see `src/lib/fsrs`); absent means ts-fsrs's defaults. */

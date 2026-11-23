@@ -1,15 +1,18 @@
-import type { BackupFile, BackupImage } from "@/db/types"
+import type { BackupFile, BackupImage, SettingRow } from "@/db/types"
 
 import { BACKUP_APP, BACKUP_SCHEMA_VERSION, type BackupData } from "./types"
 
 /**
  * Builds the backup envelope. Tombstones are included so deletions propagate.
- * `images` should hold only the images that notes use.
+ * `images` should hold only the images that notes use; `settings` the rows this
+ * device has set (a setting it never changed is not sent, so it can't overwrite
+ * another device's).
  */
 export function exportBackup(
   data: BackupData,
   now: number,
-  images: BackupImage[] = []
+  images: BackupImage[] = [],
+  settings: SettingRow[] = []
 ): BackupFile {
   return {
     app: BACKUP_APP,
@@ -20,6 +23,7 @@ export function exportBackup(
     cards: data.cards,
     revlog: data.revlog,
     images,
+    settings,
   }
 }
 

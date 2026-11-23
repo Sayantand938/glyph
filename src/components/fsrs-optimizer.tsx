@@ -2,9 +2,11 @@ import * as React from "react"
 import { SparklesIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { loadReviewRecords } from "@/db/queries"
-import { useFsrsWeights } from "@/hooks/use-fsrs-weights"
+import { countReviews, loadReviewRecords } from "@/db/queries"
+import { saveSetting } from "@/db/repo"
+import { useSettings } from "@/hooks/use-settings"
 import {
+  AUTO_FIT_STEP,
   MIN_SCORED_REVIEWS,
   buildSequences,
   countScored,
@@ -64,7 +66,8 @@ function ResultNote({ result }: { result: OptimizeResult }) {
  * reviews better than the current ones.
  */
 export function FsrsOptimizer() {
-  const [weights, setWeights] = useFsrsWeights()
+  const { fit, autoFit } = useSettings()
+  const weights = fit.weights
   const [sequences, setSequences] = React.useState<Sequence[] | null>(null)
   const [phase, setPhase] = React.useState<Phase>({ kind: "idle" })
   const controller = React.useRef<AbortController | null>(null)
@@ -110,8 +113,13 @@ export function FsrsOptimizer() {
         signal: abort.signal,
         onProgress: (progress) => setPhase({ kind: "running", progress }),
       })
-      if (result.status === "done" && result.improved) {
-        setWeights(result.weights)
+      if (result.status === "done") {
+        // Saved even when nothing improved: the count tells the automatic refit
+        // (on this or a synced device) that this history has been fitted.
+        await saveSetting("fit", {
+          weights: result.improved ? result.weights : weights,
+          reviews: records.length,
+        })
       }
       setPhase({ kind: "result", result })
     } catch (error) {
@@ -142,8 +150,8 @@ export function FsrsOptimizer() {
         <p className="text-xs text-muted-foreground">
           Fits the memory model to your own answers, so intervals match how fast
           you actually forget. It counts a correct answer as remembered or
-          guessed (one in four), which a flashcard app doesn&apos;t have to.
-          Re-run it every few hundred reviews.
+          guessed (one in four), which a flashcard app doesn&apos;t have to. You
+          can run it yourself at any time.
         </p>
         <p className="text-xs text-muted-foreground">
           {scored === null
@@ -192,13 +200,38 @@ export function FsrsOptimizer() {
           size="sm"
           disabled={!personalized || running}
           onClick={() => {
-            setWeights(null)
             setPhase({ kind: "idle" })
+            void countReviews()
+              .then((reviews) =>
+                saveSetting("fit", { weights: null, reviews })
+              )
+              .catch(() => undefined)
           }}
         >
           Reset to defaults
         </Button>
       </div>
+
+      <label className="flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 accent-primary"
+          checked={autoFit}
+          onChange={(e) =>
+            void saveSetting("autoFit", e.target.checked).catch(
+              () => undefined
+            )
+          }
+        />
+        <span>
+          <span className="block font-medium">Re-fit automatically</span>
+          <span className="block text-muted-foreground">
+            Runs by itself after every {AUTO_FIT_STEP} reviews, between study
+            sessions. The parameters and this setting sync with your questions,
+            so your devices stay in step.
+          </span>
+        </span>
+      </label>
 
       {phase.kind === "result" && (
         <div

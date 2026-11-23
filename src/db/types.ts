@@ -1,4 +1,7 @@
 import type { CardMarks } from "@/lib/card-marks"
+import type { SettingRow } from "@/lib/settings"
+
+export type { SettingRow }
 
 export interface Deck {
   id: string
@@ -124,4 +127,6 @@ export interface BackupFile {
   revlog: RevlogRow[]
   /** Only the images that notes use. Absent in schema version 1 files. */
   images: BackupImage[]
+  /** Only the settings this device has changed. Absent before schema version 6. */
+  settings: SettingRow[]
 }

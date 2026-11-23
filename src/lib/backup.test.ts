@@ -240,6 +240,55 @@ describe("exportBackup / parseBackup", () => {
     )
   })
 
+  describe("settings", () => {
+    const settings = [
+      { key: "retention" as const, value: 0.9, updatedAt: 50 },
+      { key: "leechAction" as const, value: "suspend", updatedAt: 60 },
+    ]
+
+    it("round-trips settings", () => {
+      const file = exportBackup(sample, 1, [], settings)
+      expect(file.settings).toEqual(settings)
+      expect(parseBackup(serializeBackup(file))).toEqual({
+        ok: true,
+        backup: file,
+      })
+    })
+
+    it("accepts a file from before settings existed", () => {
+      const text = mutate((f) => {
+        f.schemaVersion = 5
+        delete f.settings
+      })
+      const parsed = parseBackup(text)
+      expect(parsed.ok && parsed.backup.settings).toEqual([])
+    })
+
+    it("rejects an unknown setting or a bad value, naming the row", () => {
+      const withSettings = (rows: unknown[]) =>
+        mutate((f) => (f.settings = rows))
+      rejects(
+        withSettings([{ key: "newLimit", value: 30, updatedAt: 1 }]),
+        /settings\[0\]/
+      )
+      rejects(
+        withSettings([{ key: "retention", value: "high", updatedAt: 1 }]),
+        /settings\[0\]/
+      )
+      rejects(
+        mutate((f) => (f.settings = "x")),
+        /"settings"/
+      )
+    })
+
+    it("mentions updated settings in the merge summary", () => {
+      const zero = mergeBackup(data(), data()).stats
+      expect(formatMergeSummary({ ...zero, settingsUpdated: 2 })).toBe(
+        "Merged: 2 settings updated."
+      )
+    })
+  })
+
   describe("images", () => {
     const image = {
       id: "0123456789abcdef0123456789abcdef",

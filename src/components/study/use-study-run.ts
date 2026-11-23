@@ -6,16 +6,17 @@ import {
   applyReview,
   buryCard,
   restoreMarks,
+  type LeechOutcome,
   setFlag,
   setSuspended,
   undoReview,
 } from "@/db/repo"
 import { Rating, previewIntervals, type Grade } from "@/db/scheduler"
-import { useFsrsWeights } from "@/hooks/use-fsrs-weights"
-import { useRetention } from "@/hooks/use-retention"
+import { useSettings } from "@/hooks/use-settings"
 import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
 import { marksOf, nextDayStart, toggleFlag } from "@/lib/card-marks"
+import { leechNotice, leechRule } from "@/lib/leech"
 import { buildQueue } from "@/lib/queue"
 import {
   dropCardFrom,
@@ -47,8 +48,10 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     true,
     parseBool
   )
-  const [retention] = useRetention()
-  const [weights] = useFsrsWeights()
+  const settings = useSettings()
+  const { retention } = settings
+  const weights = settings.fit.weights
+  const leech = leechRule(settings.leechThreshold, settings.leechAction)
   const busy = React.useRef(false)
   const shownAt = React.useRef(0)
 
@@ -167,14 +170,15 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     busy.current = true
     try {
       const durationMs = currentTime() - shownAt.current
-      const { log } = await applyReview(
+      const { log, leech: outcome } = await applyReview(
         view.card,
         Rating.Again,
         durationMs,
         retention,
         weights ?? undefined,
         undefined,
-        { correct: false, answerMs: durationMs }
+        { correct: false, answerMs: durationMs },
+        leech ?? undefined
       )
       const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {
@@ -186,14 +190,22 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         queue: current.queue,
         index: current.index,
         undoable: true,
+        leech: outcome ?? undefined,
       }
+      noteLeech(outcome)
+      // A card the leech rule suspended is not asked again this session; it
+      // stays on screen (its explanation) until Next.
+      const suspended = outcome?.suspended === true
       setRun(
         (r) =>
           r && {
             ...r,
-            queue: requeueAgain(r.queue, r.index, gap),
+            queue: suspended
+              ? dropCardFrom(r.queue, r.index + 1, entry.cardId)
+              : requeueAgain(r.queue, r.index, gap),
             phase: { kind: "wrong", picked },
             history: [...r.history, entry],
+            hidden: suspended ? [...r.hidden, entry.cardId] : r.hidden,
           }
       )
     } catch (error) {
@@ -213,7 +225,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     setNotice(null)
     try {
       const durationMs = currentTime() - shownAt.current
-      const { log } = await applyReview(
+      const { log, leech: outcome } = await applyReview(
         view.card,
         rating,
         durationMs,
@@ -226,7 +238,8 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
             durationMs,
             Math.max(0, pickedAt - shownAt.current)
           ),
-        }
+        },
+        leech ?? undefined
       )
       const failed = rating === Rating.Again
       const gap = requeueGap(seed, view.card.cardId, current.index)
@@ -239,22 +252,40 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         queue: current.queue,
         index: current.index,
         undoable: true,
+        leech: outcome ?? undefined,
       }
       shownAt.current = currentTime()
-      setRun(
-        (r) =>
-          r && {
-            ...r,
-            queue: failed ? requeueAgain(r.queue, r.index, gap) : r.queue,
-            index: r.index + 1,
-            phase: { kind: "question" },
-            history: [...r.history, entry],
-          }
-      )
+      noteLeech(outcome)
+      const suspended = outcome?.suspended === true
+      setRun((r) => {
+        if (!r) return r
+        const queue = suspended
+          ? dropCardFrom(r.queue, r.index + 1, entry.cardId)
+          : failed
+            ? requeueAgain(r.queue, r.index, gap)
+            : r.queue
+        return {
+          ...r,
+          queue,
+          index: r.index + 1,
+          phase: { kind: "question" },
+          history: [...r.history, entry],
+          hidden: suspended ? [...r.hidden, entry.cardId] : r.hidden,
+        }
+      })
     } catch (error) {
       setMessage(errorText(error, "Couldn't save that review."))
     } finally {
       busy.current = false
+    }
+  }
+
+  /** Tells the user when a review has just made the card a leech. */
+  function noteLeech(outcome: LeechOutcome | null) {
+    if (outcome) {
+      setNotice(
+        leechNotice(outcome.action, outcome.lapses, outcome.taggedNote)
+      )
     }
   }
 
@@ -284,13 +315,21 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     setNotice(null)
     dropFocus()
     try {
-      const restored = await undoReview(entry.logId, entry.previousRow)
+      const restored = await undoReview(
+        entry.logId,
+        entry.previousRow,
+        entry.leech
+      )
       shownAt.current = currentTime()
       setRun((r) => {
         if (!r) return r
         const history = r.history.slice(0, -1)
-        // A card suspended or buried since then must not come back with the old queue.
-        const queue = r.hidden.reduce(
+        // Undoing the review that made a card a leech un-suspends it, so it may
+        // come back; any other suspended or buried card must not.
+        const hidden = entry.leech?.suspended
+          ? r.hidden.filter((id) => id !== entry.cardId)
+          : r.hidden
+        const queue = hidden.reduce(
           (q, id) => dropCardFrom(q, entry.index, id),
           entry.queue
         )
@@ -300,7 +339,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
               index: entry.index,
               phase: { kind: "question" },
               history,
-              hidden: r.hidden,
+              hidden,
               lastMark: r.lastMark,
             }
           : { ...r, history }

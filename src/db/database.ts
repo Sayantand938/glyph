@@ -4,7 +4,14 @@ import { marksOf, type CardMarks } from "@/lib/card-marks"
 
 import { emptyCardRow } from "./scheduler"
 import { seedIfEmpty } from "./seed"
-import type { CardRow, Deck, ImageRow, Note, RevlogRow } from "./types"
+import type {
+  CardRow,
+  Deck,
+  ImageRow,
+  Note,
+  RevlogRow,
+  SettingRow,
+} from "./types"
 
 export class GlyphDB extends Dexie {
   decks!: Table<Deck, string>
@@ -12,6 +19,7 @@ export class GlyphDB extends Dexie {
   cards!: Table<CardRow, string>
   revlog!: Table<RevlogRow, string>
   images!: Table<ImageRow, string>
+  settings!: Table<SettingRow, string>
 
   constructor() {
     super("glyph")
@@ -69,6 +77,9 @@ export class GlyphDB extends Dexie {
             )
           })
       })
+    // Settings that sync with the data (retention, fitted weights, leech rule):
+    // one row per key, so a backup can carry them. Only adds a table.
+    this.version(6).stores({ settings: "key" })
   }
 }
 

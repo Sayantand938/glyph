@@ -241,10 +241,23 @@ describe("filters", () => {
       review: 3,
       due: 4,
       lapsed: 1,
+      leeches: 0,
       flagged: 0,
       suspended: 0,
       buried: 0,
     })
+  })
+
+  it("leeches are the questions tagged leech, whatever their lapses", () => {
+    const tagged = [
+      row({ id: "a", tags: ["leech"] }, { lapses: 9 }),
+      row({ id: "b", tags: ["leech", "physics"] }, { lapses: 0 }),
+      row({ id: "c", tags: ["physics"] }, { lapses: 12 }),
+    ]
+    expect(
+      filterRows(tagged, { query: "", filter: "leeches" }, NOW).map((r) => r.id)
+    ).toEqual(["a", "b"])
+    expect(filterCounts(tagged, NOW).leeches).toBe(2)
   })
 
   it("due matches the dashboard's Learning + Due counts", () => {
