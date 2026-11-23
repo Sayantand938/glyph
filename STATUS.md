@@ -51,6 +51,15 @@ Question text, option text and the explanation (`extra`) now render LaTeX with K
 - New dependency (rule 8): `katex` (+ `@types/katex` dev), the only practical offline renderer with no network calls. Its CSS and fonts are bundled by Vite; the woff2 fonts are in the service-worker precache (18 -> 37 entries, ~1.2 MB), so math works offline. The JS bundle grew to ~850 kB (270 kB gzip); code-splitting KaTeX is possible if that matters.
 - Verified in the browser (dev server): all four delimiters in question, options and explanation, currency text left alone, `\$` escape, display math centred, no console errors. Not exercised: the production build offline, a real phone, or very wide display formulas on a narrow screen (display math scrolls horizontally).
 
+### Markdown in questions (after Phase 7)
+
+Question text, option text and the explanation now render a small Markdown subset on top of the LaTeX support: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `` `inline code` ``, fenced code blocks, `#` headings (levels 4-6 render as level 3), `-`/`*`/`+` and `1.` lists (flat, no nesting), and `>` quotes. Links, images, tables and raw HTML are deliberately not supported. No new dependency: `src/lib/markdown.ts` (`parseMarkdown`, pure, 20 tests in `markdown.test.ts`) is a hand-written parser that returns plain data, and `RichText` turns it into React elements (rule 10 still holds; there is no HTML string anywhere).
+
+- Math and code are cut out first, so `$a_1 * b_2$` is never read as emphasis, `$` inside code stays a dollar sign, and `**value $x$**` works. Display math (`$$`/`\[`) is not broken by lines that look like list or heading syntax.
+- Safe for ordinary quiz text: `2 * 3 * 4`, `snake_case`, `C#`, `#hashtag` and "costs $5 or $10" stay plain. `\*` escapes an asterisk.
+- Text with no block structure renders as a bare fragment exactly as before, so existing notes look the same. Multi-block text becomes stacked `<span>`s, because `RichText` is also used inside a `<button>` (option text), where `p`/`ul`/`pre` are not allowed.
+- Stored text is unchanged, so hashing, `noteId`, import, backup and the editor are unaffected. The edit modal and import preview still show raw text. `sample-data/markdown-sample.json` exercises it.
+
 ### Refactor: smaller files (after Phase 7)
 
 Pure restructuring, no behavior change. The four largest modules became directories; import paths for `@/lib/backup`, `@/lib/importer` and `@/db/repo` are unchanged (barrel `index.ts`). Phase notes below still name the old single files.

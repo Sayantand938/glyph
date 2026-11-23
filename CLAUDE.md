@@ -36,7 +36,7 @@ src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn; study/ = study session; import/ = import modal)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, note-edit, math
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, note-edit, math, markdown
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```
@@ -54,7 +54,7 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 7. A note's `id` is frozen at creation. Editing a question never changes it; re-import must never touch a card row.
 8. No new dependencies beyond the stack above without a stated reason.
 9. Components that query Dexie render under `DbProvider`, which runs `initDatabase()` (persist + seed) first.
-10. Question/option/explanation text is rendered as plain text (React escapes it). Never `dangerouslySetInnerHTML`. LaTeX goes through `RichText` (`src/components/rich-text.tsx`), which calls `katex.render` into a ref, never an HTML string. Delimiters are parsed by `splitMath` in `src/lib/math.ts`: `$...$` (the default, documented form), `$$...$$`, `\(...\)` and `\[...\]` are all supported; `\$` is a literal dollar sign.
+10. Question/option/explanation text is rendered as plain text (React escapes it). Never `dangerouslySetInnerHTML`. Rich text goes through `RichText` (`src/components/rich-text.tsx`), which builds React elements from `parseMarkdown` (`src/lib/markdown.ts`: bold, italic, strike, inline code, code fences, headings, lists, quotes; no links, images, tables or raw HTML) and calls `katex.render` into a ref for math, never an HTML string. Delimiters are parsed by `splitMath` in `src/lib/math.ts`: `$...$` (the default, documented form), `$$...$$`, `\(...\)` and `\[...\]` are all supported; `\$` is a literal dollar sign.
 11. Two-grade scale only: reviews are `Again` (fail) or `Good` (pass), the `Grade` type in `scheduler.ts`. Never add Hard/Easy buttons or write ratings 2/4 (old logs and imported backups may contain them; keep accepting those).
 
 ## Gotchas

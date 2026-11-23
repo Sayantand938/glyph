@@ -1,0 +1,6 @@
+[
+  { "sl": 1, "questions": "Which keyword makes a variable **block-scoped** in JavaScript?", "op1": "`var`", "op2": "`let`", "op3": "`function`", "op4": "`typeof`", "answer": "op2", "extra": "`let` and `const` are block-scoped; `var` is *function*-scoped." },
+  { "sl": 2, "questions": "# Loop output\nWhat does this print?\n```js\nfor (let i = 0; i < 3; i++) {\n  console.log(i * 2)\n}\n```", "op1": "`0 1 2`", "op2": "`0 2 4`", "op3": "`2 4 6`", "op4": "`0 2 4 6`", "answer": "op2", "extra": "The loop runs for `i = 0, 1, 2`, printing `i * 2` each time." },
+  { "sl": 3, "questions": "Which of these are valid HTTP methods?\n- GET\n- FETCH\n- POST", "op1": "GET and POST only", "op2": "GET and FETCH", "op3": "All three", "op4": "None", "answer": "op1", "extra": "## Why\n1. `GET` reads\n2. `POST` creates\n\n~~FETCH~~ is a browser API, not an HTTP method.\n\n> Methods are case-sensitive." },
+  { "sl": 4, "questions": "If $f(x) = x^2$, what is **$f'(3)$**?", "op1": "$3$", "op2": "$6$", "op3": "$9$", "op4": "$2$", "answer": "op2", "extra": "Math still works next to Markdown: $f'(x) = 2x$, and 2 * 3 = 6 stays plain text." }
+]
