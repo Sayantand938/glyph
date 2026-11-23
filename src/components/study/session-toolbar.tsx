@@ -3,6 +3,7 @@ import {
   KeyboardIcon,
   PencilIcon,
   ShuffleIcon,
+  Trash2Icon,
   Undo2Icon,
 } from "lucide-react"
 
@@ -20,6 +21,7 @@ export function SessionToolbar({
   onToggleShuffle,
   onUndo,
   onEdit,
+  onDelete,
 }: {
   scopeName: string
   counter: string
@@ -30,6 +32,7 @@ export function SessionToolbar({
   onToggleShuffle: () => void
   onUndo: () => void
   onEdit: () => void
+  onDelete: () => void
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -78,6 +81,16 @@ export function SessionToolbar({
         onClick={onEdit}
       >
         <PencilIcon />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Delete question"
+        title="Delete question"
+        disabled={!canEdit}
+        onClick={onDelete}
+      >
+        <Trash2Icon />
       </Button>
       <span
         className="flex size-8 items-center justify-center text-muted-foreground"

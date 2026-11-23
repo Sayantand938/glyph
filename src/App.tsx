@@ -1,6 +1,7 @@
 import * as React from "react"
-import { SettingsIcon } from "lucide-react"
+import { ListIcon, SettingsIcon } from "lucide-react"
 
+import { BrowsePage } from "@/components/browse/browse-page"
 import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
 import { ImportModal } from "@/components/import/import-modal"
@@ -16,26 +17,49 @@ export default function App() {
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [studying, setStudying] = React.useState<StudyScope | null>(null)
+  // `scope: null` browses every deck.
+  const [browsing, setBrowsing] = React.useState<{
+    scope: StudyScope | null
+  } | null>(null)
   const backup = useBackupControls(setNotice)
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-3xl flex-col px-4 sm:px-6">
+    <div
+      className={`mx-auto flex min-h-svh w-full flex-col px-4 sm:px-6 ${
+        // The browse table has many columns; give it room on wide screens.
+        browsing ? "max-w-6xl" : "max-w-3xl"
+      }`}
+    >
       <header className="flex items-center justify-between gap-3 border-b py-4">
         <h1 className="text-base font-semibold tracking-tight">
           glyph<span className="animate-pulse">_</span>
         </h1>
-        {!studying && !settingsOpen && (
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Settings"
-            onClick={() => {
-              setNotice(null)
-              setSettingsOpen(true)
-            }}
-          >
-            <SettingsIcon />
-          </Button>
+        {!studying && !settingsOpen && !browsing && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Browse all questions"
+              title="Browse all questions"
+              onClick={() => {
+                setNotice(null)
+                setBrowsing({ scope: null })
+              }}
+            >
+              <ListIcon />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Settings"
+              onClick={() => {
+                setNotice(null)
+                setSettingsOpen(true)
+              }}
+            >
+              <SettingsIcon />
+            </Button>
+          </div>
         )}
         {backup.input}
       </header>
@@ -59,6 +83,8 @@ export default function App() {
 
         {studying ? (
           <StudySession scope={studying} onExit={() => setStudying(null)} />
+        ) : browsing ? (
+          <BrowsePage scope={browsing.scope} onBack={() => setBrowsing(null)} />
         ) : settingsOpen ? (
           <SettingsPage
             busy={backup.busy}
@@ -77,6 +103,10 @@ export default function App() {
             onStudy={(scope) => {
               setNotice(null)
               setStudying(scope)
+            }}
+            onBrowse={(scope) => {
+              setNotice(null)
+              setBrowsing({ scope })
             }}
           />
         )}

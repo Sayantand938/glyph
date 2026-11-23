@@ -34,9 +34,9 @@ vite.config.ts      react + tailwind + VitePWA (manifest lives here)
 src/main.tsx        mounts <ThemeProvider><DbProvider><App/>
 src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
-src/components/     React components (ui/ = shadcn; study/ = study session; import/ = import modal)
+src/components/     React components (ui/ = shadcn; study/ = study session; import/ = import modal; browse/ = browse page)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, note-edit, math, markdown, image/ (tokens, fit, id, base64; encode.ts is browser-only)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, browse, note-edit, math, markdown, image/ (tokens, fit, id, base64; encode.ts is browser-only)
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```
@@ -51,7 +51,7 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 4. All writes go through `src/db/repo/` (import from `@/db/repo`), each in one Dexie transaction. Components only read (`useLiveQuery`).
 5. Pure logic (answer normalization, hashing, shuffling, queue building, merging, import planning) lives in `src/lib/` with unit tests and no DB or React imports.
 6. Never edit Dexie `version(1)` after release; add `db.version(n).upgrade()`.
-7. A note's `id` is frozen at creation. Editing a question never changes it; re-import must never touch a card row.
+7. A note's `id` is frozen at creation. Editing a question never changes it; re-import must never touch a card row. Deleting a question is a soft delete (`deleteNote` in `src/db/repo/notes.ts` sets `deletedAt`, like decks); the card row and revlog stay, and every read filters out tombstoned notes.
 8. No new dependencies beyond the stack above without a stated reason.
 9. Components that query Dexie render under `DbProvider`, which runs `initDatabase()` (persist + seed) first.
 10. Question/option/explanation text is rendered as plain text (React escapes it). Never `dangerouslySetInnerHTML`. Rich text goes through `RichText` (`src/components/rich-text.tsx`), which builds React elements from `parseMarkdown` (`src/lib/markdown.ts`: bold, italic, strike, inline code, code fences, headings, lists, quotes, and `![alt](img:<id>)` for an image stored in the `images` table, rendered by `NoteImage` as an `<img>` from a `data:` URL; no links, URL images, tables or raw HTML) and calls `katex.render` into a ref for math, never an HTML string. Delimiters are parsed by `splitMath` in `src/lib/math.ts`: `$...$` (the default, documented form), `$$...$$`, `\(...\)` and `\[...\]` are all supported; `\$` is a literal dollar sign.

@@ -2,6 +2,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   EllipsisIcon,
+  ListIcon,
   PencilIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -52,6 +53,7 @@ function DeckRow({
   expanded,
   onToggle,
   onStudy,
+  onBrowse,
   onRename,
   onDelete,
 }: {
@@ -62,6 +64,7 @@ function DeckRow({
   expanded?: boolean
   onToggle?: () => void
   onStudy: (scope: StudyScope) => void
+  onBrowse: (scope: StudyScope) => void
   onRename: (deck: Deck) => void
   onDelete: (deck: Deck) => void
 }) {
@@ -112,6 +115,10 @@ function DeckRow({
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent>
+          <DropdownMenuItem onClick={() => onBrowse(scope)}>
+            <ListIcon aria-hidden />
+            Browse
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onRename(deck)}>
             <PencilIcon aria-hidden />
             Rename
@@ -131,6 +138,7 @@ export function DeckTree({
   collapsed,
   onToggle,
   onStudy,
+  onBrowse,
   onRename,
   onDelete,
 }: {
@@ -138,6 +146,7 @@ export function DeckTree({
   collapsed: ReadonlySet<string>
   onToggle: (subjectId: string) => void
   onStudy: (scope: StudyScope) => void
+  onBrowse: (scope: StudyScope) => void
   onRename: (deck: Deck) => void
   onDelete: (deck: Deck) => void
 }) {
@@ -174,6 +183,7 @@ export function DeckTree({
               expanded={isOpen}
               onToggle={() => onToggle(subject.id)}
               onStudy={onStudy}
+              onBrowse={onBrowse}
               onRename={onRename}
               onDelete={onDelete}
             />
@@ -190,6 +200,7 @@ export function DeckTree({
                     counts={topicCounts(topic.id)}
                     scope={{ kind: "topic", id: topic.id, name: topic.name }}
                     onStudy={onStudy}
+                    onBrowse={onBrowse}
                     onRename={onRename}
                     onDelete={onDelete}
                   />

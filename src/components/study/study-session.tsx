@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { DeleteNoteDialog } from "@/components/delete-note-dialog"
 import { EditNoteModal } from "@/components/edit-note-modal"
 import { Button } from "@/components/ui/button"
 
@@ -22,6 +23,7 @@ export function StudySession({
   const s = useStudyRun(scope)
   const { run, data } = s
   const [editing, setEditing] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
   const [confirmExit, setConfirmExit] = React.useState(false)
 
   function requestExit() {
@@ -30,7 +32,7 @@ export function StudySession({
   }
 
   useStudyKeys({
-    active: run !== null && !editing && !confirmExit,
+    active: run !== null && !editing && !deleting && !confirmExit,
     phase: run?.phase.kind ?? null,
     empty: s.empty,
     finished: s.finished,
@@ -80,6 +82,7 @@ export function StudySession({
         onToggleShuffle={() => s.setShuffle(!s.shuffle)}
         onUndo={() => void s.undo()}
         onEdit={() => setEditing(true)}
+        onDelete={() => setDeleting(true)}
       />
 
       {s.message && (
@@ -123,6 +126,12 @@ export function StudySession({
         onSaved={(note, resetFsrs) => {
           if (resetFsrs) s.disableUndoFor(note.id)
         }}
+      />
+
+      <DeleteNoteDialog
+        note={deleting && data ? data.note : null}
+        onClose={() => setDeleting(false)}
+        onDeleted={(note) => s.dropDeleted(note.id)}
       />
 
       <ExitDialog

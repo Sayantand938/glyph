@@ -1,5 +1,6 @@
 /** Read-only queries. Writes live in repo.ts. Call these from `useLiveQuery`. */
 import type { BackupData } from "@/lib/backup"
+import { makeBrowseRow, type BrowseRow } from "@/lib/browse"
 import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
@@ -90,6 +91,59 @@ export async function loadStudyCards(scope: {
     )
     const cards = await db.cards.where("topicId").anyOf(topicIds).toArray()
     return cards.filter((card) => !deadNotes.has(card.noteId))
+  })
+}
+
+export interface BrowseItem {
+  row: BrowseRow
+  /** The full note, so the editor can open straight from the list. */
+  note: Note
+}
+
+/**
+ * Every live question in `scope` (all decks when null) with its progress, for
+ * the browse list: live notes in live Topics under live Subjects.
+ */
+export async function loadBrowseItems(
+  scope: { kind: "subject" | "topic"; id: string } | null
+): Promise<BrowseItem[]> {
+  return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
+    const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
+    const subjects = new Map(
+      decks.filter((d) => d.parentId === null).map((d) => [d.id, d])
+    )
+    const topics = decks.filter(
+      (d) =>
+        d.parentId !== null &&
+        subjects.has(d.parentId) &&
+        (scope === null ||
+          (scope.kind === "subject"
+            ? d.parentId === scope.id
+            : d.id === scope.id))
+    )
+    const topicById = new Map(topics.map((t) => [t.id, t]))
+
+    const notes = (
+      await db.notes
+        .where("topicId")
+        .anyOf([...topicById.keys()])
+        .toArray()
+    ).filter((n) => n.deletedAt === null)
+    const cards = await db.cards.bulkGet(notes.map((n) => n.id))
+
+    return notes.map((note, i) => {
+      const topic = topicById.get(note.topicId)
+      const subject = topic?.parentId ? subjects.get(topic.parentId) : undefined
+      return {
+        note,
+        row: makeBrowseRow(
+          note,
+          cards[i],
+          topic?.name ?? "",
+          subject?.name ?? ""
+        ),
+      }
+    })
   })
 }
 

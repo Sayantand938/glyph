@@ -38,3 +38,23 @@ export async function saveNote(
     return saved
   })
 }
+
+/**
+ * Soft-deletes one question: tombstones the note (`deletedAt`), the same way a
+ * deleted deck's notes are. The card row and review log stay, so a question
+ * that is imported again comes back with its progress. `deletedAt` is always
+ * newer than `contentUpdatedAt`, so the tombstone beats this note's own older
+ * copies in a backup merge. Images are kept (tombstoned notes still count as
+ * users). Deleting an already deleted note does nothing.
+ */
+export async function deleteNote(id: string, now = Date.now()): Promise<void> {
+  await db.transaction("rw", db.notes, async () => {
+    const note = await db.notes.get(id)
+    if (!note) throw new Error("Question not found.")
+    if (note.deletedAt !== null) return
+    await db.notes.put({
+      ...note,
+      deletedAt: Math.max(now, note.contentUpdatedAt + 1),
+    })
+  })
+}
