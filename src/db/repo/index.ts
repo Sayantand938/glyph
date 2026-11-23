@@ -9,7 +9,13 @@ export {
   setSuspended,
   unburyCard,
 } from "./cards"
-export { createDeck, isLiveDeck, renameDeck, softDeleteDeck } from "./decks"
+export {
+  createDeck,
+  createDeckPath,
+  isLiveDeck,
+  renameDeck,
+  softDeleteDeck,
+} from "./decks"
 export { clearAllData, importBackup } from "./import-backup"
 export { addImage, pruneImages } from "./images"
 export { commitImport, type ImportTarget } from "./import-notes"

@@ -1,4 +1,4 @@
-import { childrenOf, subtreeIds } from "@/lib/deck-tree"
+import { childrenOf, liveDecks, subtreeIds } from "@/lib/deck-tree"
 import { deckNameKey } from "@/lib/importer"
 
 import { db } from "../database"
@@ -61,6 +61,77 @@ export async function createDeck(
     await addRows(tx, DECKS, [deck])
   })
   return deck
+}
+
+/**
+ * Walks `path` from `parentId` (the top when null), reusing live decks and
+ * creating the missing ones, and returns the deepest plus how many it made.
+ * Names are matched against the database (not a UI snapshot), so a stale
+ * screen can't create a duplicate. Runs inside the caller's transaction.
+ */
+export async function resolveOrCreatePath(
+  tx: SqlRunner,
+  path: readonly string[],
+  now: number,
+  parentId: string | null = null
+): Promise<{ deck: Deck; created: number }> {
+  if (parentId !== null && !(await isLiveDeck(tx, parentId))) {
+    throw new Error("That deck no longer exists.")
+  }
+  const live = liveDecks(await allRows(tx, DECKS))
+  let deck: Deck | null = null
+  let created = 0
+
+  for (const raw of path) {
+    const name = cleanName(raw)
+    const key = deckNameKey(name)
+    const above: string | null = parentId
+    const found: Deck | undefined = live.find(
+      (d) => d.parentId === above && deckNameKey(d.name) === key
+    )
+    if (found) {
+      deck = found
+    } else {
+      deck = {
+        id: crypto.randomUUID(),
+        parentId: above,
+        name,
+        updatedAt: now,
+        deletedAt: null,
+      }
+      await addRows(tx, DECKS, [deck])
+      live.push(deck)
+      created += 1
+    }
+    parentId = deck.id
+  }
+
+  if (!deck) throw new Error("Choose a deck to import into.")
+  return { deck, created }
+}
+
+/**
+ * Makes the deck at the end of a typed path ("WBCS", "Mains", "2018") under
+ * `parentId`, creating each missing level on the way. Levels that already exist
+ * are reused, but the last one must be new.
+ */
+export async function createDeckPath(
+  path: readonly string[],
+  parentId: string | null = null
+): Promise<Deck> {
+  if (path.length === 0) throw new Error("Name cannot be empty.")
+  return db.transaction(async (tx) => {
+    const { deck, created } = await resolveOrCreatePath(
+      tx,
+      path,
+      Date.now(),
+      parentId
+    )
+    if (created === 0) {
+      throw new Error("A deck with that name already exists here.")
+    }
+    return deck
+  })
 }
 
 export async function renameDeck(id: string, name: string): Promise<void> {

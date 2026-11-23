@@ -22,6 +22,7 @@ import {
   applyReview,
   commitImport,
   createDeck,
+  createDeckPath,
   deleteNote,
   importBackup,
   saveNote,
@@ -209,6 +210,32 @@ describe("notes and decks", () => {
     await expect(createDeck("Late", algebra.id)).rejects.toThrow(
       "no longer exists"
     )
+  })
+
+  it("creates a typed path of decks, reusing levels that exist", async () => {
+    const mains = await createDeckPath(["Exam", "Mains"])
+    const top = (await createDeckPath(["exam", "Prelims", "2018"])).parentId
+    // "exam" reused the existing "Exam"; only Prelims and 2018 are new.
+    const prelims = await createDeckPath(["Exam", "Mains", "Paper 1"])
+    expect(prelims.parentId).toBe(mains.id)
+    expect(mains.parentId).not.toBeNull()
+    expect(top).not.toBeNull()
+    const decks = (await loadDashboard(NOW)).children
+    expect(
+      (decks.get(null) ?? []).filter((d) => d.name === "Exam")
+    ).toHaveLength(1)
+
+    // The last level must be new.
+    await expect(createDeckPath(["Exam", "Mains"])).rejects.toThrow(
+      "already exists"
+    )
+    // Relative to a parent deck.
+    const sub = await createDeckPath(["A", "B"], mains.id)
+    expect(sub.name).toBe("B")
+    await expect(createDeckPath(["X"], "nope")).rejects.toThrow(
+      "no longer exists"
+    )
+    await expect(createDeckPath([])).rejects.toThrow("empty")
   })
 })
 

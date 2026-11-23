@@ -3,8 +3,9 @@ import { AlertTriangleIcon } from "lucide-react"
 
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import { createDeck, renameDeck, softDeleteDeck } from "@/db/repo"
+import { createDeckPath, renameDeck, softDeleteDeck } from "@/db/repo"
 import type { Deck } from "@/db/types"
+import { PATH_SEPARATOR, parseDeckPath } from "@/lib/deck-tree"
 import { deckNameKey } from "@/lib/importer"
 
 function errorMessage(error: unknown): string {
@@ -32,9 +33,11 @@ export function RenameDeckPage({
   )
   const problem = !trimmed
     ? "Name cannot be empty."
-    : clash
-      ? "A deck with that name already exists here."
-      : null
+    : trimmed.includes(">")
+      ? "A name cannot contain >, it separates sub-decks."
+      : clash
+        ? "A deck with that name already exists here."
+        : null
   const unchanged = trimmed === deck.name
 
   async function save(event: React.FormEvent) {
@@ -114,22 +117,20 @@ export function CreateDeckPage({
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const trimmed = name.trim()
-  const clash = siblings.some(
-    (d) => deckNameKey(d.name) === deckNameKey(trimmed)
-  )
-  const problem = !trimmed
-    ? null
-    : clash
-      ? "A deck with that name already exists here."
-      : null
+  // "WBCS > Mains > 2018" makes three nested decks; a plain name makes one.
+  const names = parseDeckPath(name)
+  const nested = names.length > 1
+  const clash =
+    names.length === 1 &&
+    siblings.some((d) => deckNameKey(d.name) === deckNameKey(names[0]))
+  const problem = clash ? "A deck with that name already exists here." : null
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!trimmed || problem || busy) return
+    if (names.length === 0 || problem || busy) return
     setBusy(true)
     try {
-      await createDeck(trimmed, parent?.id ?? null)
+      await createDeckPath(names, parent?.id ?? null)
       onClose()
     } catch (e) {
       setError(errorMessage(e))
@@ -158,7 +159,10 @@ export function CreateDeckPage({
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !trimmed || problem !== null}>
+          <Button
+            type="submit"
+            disabled={busy || names.length === 0 || problem !== null}
+          >
             {busy ? "Creating..." : "Create"}
           </Button>
         </>
@@ -173,6 +177,7 @@ export function CreateDeckPage({
           autoFocus
           className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           value={name}
+          placeholder="Deck or Deck > Sub-deck > Sub-deck"
           onChange={(e) => {
             setName(e.target.value)
             setError(null)
@@ -180,6 +185,11 @@ export function CreateDeckPage({
         />
         <p role="alert" className="min-h-4 text-xs">
           {error ?? problem}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {nested
+            ? `Creates ${names.join(PATH_SEPARATOR)}, adding any level that is missing.`
+            : "Use > to make sub-decks in one go, like WBCS > Mains > 2018."}
         </p>
       </div>
     </PageShell>

@@ -1,6 +1,4 @@
-import { liveDecks } from "@/lib/deck-tree"
 import {
-  deckNameKey,
   planImport,
   summarize,
   type ImportSummary,
@@ -9,18 +7,9 @@ import {
 
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
-import type { SqlRunner } from "../sql"
-import {
-  CARDS,
-  DECKS,
-  NOTES,
-  addRows,
-  allRows,
-  getRows,
-  putNotes,
-} from "../tables"
-import type { Deck, Note } from "../types"
-import { cleanName } from "./clean-name"
+import { CARDS, NOTES, addRows, getRows, putNotes } from "../tables"
+import type { Note } from "../types"
+import { resolveOrCreatePath } from "./decks"
 
 export interface ImportTarget {
   /**
@@ -29,47 +18,6 @@ export interface ImportTarget {
    * spacing) or creates it, so any depth works.
    */
   path: readonly string[]
-}
-
-/**
- * Walks `path` from the top, reusing live decks and creating the missing ones,
- * and returns the deepest. Names are matched against the database (not a UI
- * snapshot), so a stale screen can't create a duplicate. Runs inside the
- * caller's transaction.
- */
-async function resolveOrCreatePath(
-  tx: SqlRunner,
-  path: readonly string[],
-  now: number
-): Promise<Deck> {
-  const live = liveDecks(await allRows(tx, DECKS))
-  let parentId: string | null = null
-  let deck: Deck | null = null
-
-  for (const raw of path) {
-    const name = cleanName(raw)
-    const key = deckNameKey(name)
-    const found: Deck | undefined = live.find(
-      (d) => d.parentId === parentId && deckNameKey(d.name) === key
-    )
-    if (found) {
-      deck = found
-    } else {
-      deck = {
-        id: crypto.randomUUID(),
-        parentId,
-        name,
-        updatedAt: now,
-        deletedAt: null,
-      }
-      await addRows(tx, DECKS, [deck])
-      live.push(deck)
-    }
-    parentId = deck.id
-  }
-
-  if (!deck) throw new Error("Choose a deck to import into.")
-  return deck
 }
 
 /**
@@ -86,7 +34,7 @@ export async function commitImport(
   now = Date.now()
 ): Promise<ImportSummary> {
   return db.transaction(async (tx) => {
-    const topic = await resolveOrCreatePath(tx, target.path, now)
+    const { deck: topic } = await resolveOrCreatePath(tx, target.path, now)
 
     // Reading by id (not by topic) also finds tombstones for resurrection.
     const probe = planImport(rows, topic.id, new Map(), now)
