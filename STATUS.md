@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 336 tests pass; typecheck, lint and build are clean. The Next.js → Vite migration is complete.
+**Current version: 0.1.0** (the first tagged release; the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 336 tests pass; typecheck, lint and build are clean. The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
