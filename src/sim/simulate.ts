@@ -52,6 +52,17 @@ export interface Scenario {
   newPerDay?: number
   /** ms epoch of the first day (local midnight); default 2026-01-01. */
   startMs?: number
+  /**
+   * The learner stops after this many answers in a day (their own time limit;
+   * the app has none). Whatever is left stays due. Omitted = answers everything.
+   */
+  maxAnswersPerDay?: number
+  /**
+   * The learner sets the day's new-card limit to what is left of
+   * `maxAnswersPerDay` after the due reviews (as the study options page lets
+   * them do), at most `newPerDay` when that is also given.
+   */
+  fillWithNew?: boolean
   /** Session start varies by up to this many hours either side of 09:00. */
   startJitterHours: number
   seed: number
@@ -247,7 +258,8 @@ function* simulateSteps(
     day: number,
     now: number,
     seed: string,
-    newLimit: number | null
+    newLimit: number | null,
+    answerBudget: number
   ): number {
     let queue = buildQueue({
       cards: queueCards(),
@@ -261,7 +273,7 @@ function* simulateSteps(
     let answers = 0
     let newSeen = 0
 
-    while (index < queue.length) {
+    while (index < queue.length && answers < answerBudget) {
       const id = queue[index]
       const row = rows.get(id)
       const mem = memory.get(id)
@@ -367,20 +379,34 @@ function* simulateSteps(
     const skipped = onVacation || rnd() < scenario.skipProbability
 
     if (!skipped) {
+      let counts = { new: 0, learning: 0, due: 0 }
       for (let s = 0; s < scenario.sessionsPerDay; s += 1) {
         const jitter = (rnd() * 2 - 1) * scenario.startJitterHours * HOUR
         const now = start + day * DAY + (9 + s * 10) * HOUR + jitter
         if (s === 0) {
-          const counts = countCards(queueCards(), now)
+          counts = countCards(queueCards(), now)
           daySession.backlog = counts.learning + counts.due
         }
-        const newLimit =
+        const cap = scenario.maxAnswersPerDay ?? Infinity
+        let newLimit =
           scenario.newPerDay === undefined
             ? null
             : s === 0
               ? scenario.newPerDay
               : 0
-        runSession(day, now, `sim:${scenario.seed}:${day}:${s}`, newLimit)
+        if (scenario.fillWithNew && s === 0) {
+          // Wrong answers come back, so a due card costs a little over one answer.
+          const expected = Math.ceil((counts.learning + counts.due) * 1.3)
+          const room = Math.max(0, cap - expected)
+          newLimit = Math.min(room, scenario.newPerDay ?? room)
+        }
+        runSession(
+          day,
+          now,
+          `sim:${scenario.seed}:${day}:${s}`,
+          newLimit,
+          Math.max(0, cap - daySession.answers)
+        )
       }
     }
 

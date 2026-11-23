@@ -28,13 +28,20 @@ import { buildSequences, optimizeWeights } from "@/lib/fsrs"
 import { exportBackup, parseBackup, serializeBackup } from "@/lib/backup"
 import { parseImportText, validateRows } from "@/lib/importer"
 import { leechRule } from "@/lib/leech"
+import { Reassembler, splitChunks } from "@/lib/sync"
 import { buildQueue } from "@/lib/queue"
 
 import { DAY, report, simulate, type Scenario } from "./simulate"
 
 export interface BrowserSimOptions {
   /** URL of the question file (JSON array in the importer format). */
-  dataUrl: string
+  dataUrl?: string
+  /** Instead of a file: this many generated lorem questions. */
+  questions?: number
+  /** With `questions`: how many topics (decks) to spread them over. */
+  topics?: number
+  /** Skip the restore-from-backup step (it needs a lot of memory on a big log). */
+  skipRestore?: boolean
   days?: number
   /** Measure after this many simulated days. */
   checkpointEvery?: number
@@ -98,6 +105,29 @@ export interface Checkpoint {
   storageMB: number | null
 }
 
+/** Deterministic fake questions in the importer's format. */
+function lorem(count: number): unknown[] {
+  const words =
+    "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud".split(
+      " "
+    )
+  const text = (seed: number, n: number) =>
+    Array.from(
+      { length: n },
+      (_, k) => words[(seed * 7 + k * 13) % words.length]
+    ).join(" ")
+  return Array.from({ length: count }, (_, i) => ({
+    sl: i + 1,
+    questions: `Q${i + 1}. ${text(i, 8 + (i % 8))}?`,
+    op1: text(i + 1, 2 + (i % 3)),
+    op2: text(i + 2, 2 + (i % 4)),
+    op3: text(i + 3, 2),
+    op4: text(i + 4, 3),
+    answer: `op${1 + (i % 4)}`,
+    extra: `${text(i + 5, 18)}.`,
+  }))
+}
+
 export async function runBrowserSim(options: BrowserSimOptions) {
   const progress = (message: string) => {
     ;(window as unknown as { __simProgress: string }).__simProgress = message
@@ -109,10 +139,17 @@ export async function runBrowserSim(options: BrowserSimOptions) {
   await Promise.all(db.tables.map((table) => table.clear()))
 
   progress("importing questions")
-  const text = await (await fetch(options.dataUrl)).text()
-  const parsed = parseImportText(text)
-  if (!parsed.ok) throw new Error(parsed.error)
-  const { valid, invalid } = validateRows(parsed.rows)
+  let rows: unknown[]
+  if (options.questions !== undefined) {
+    rows = lorem(options.questions)
+  } else {
+    const text = await (await fetch(options.dataUrl ?? "")).text()
+    const parsed = parseImportText(text)
+    if (!parsed.ok) throw new Error(parsed.error)
+    rows = parsed.rows
+  }
+  const { valid, invalid } = validateRows(rows)
+  const topicCount = Math.max(1, options.topics ?? 1)
 
   const today = new Date()
   const startMs = new Date(
@@ -121,17 +158,25 @@ export async function runBrowserSim(options: BrowserSimOptions) {
     today.getDate() - days
   ).getTime()
 
-  const summary = await time(() =>
-    commitImport(
-      {
-        subject: { kind: "new", name: "Lorem" },
-        topic: { kind: "new", name: "Ipsum" },
-      },
-      valid,
-      invalid.length,
-      startMs
-    )
-  )
+  const summary = await time(async () => {
+    const per = Math.ceil(valid.length / topicCount)
+    let added = 0
+    for (let t = 0; t < topicCount; t += 1) {
+      const part = valid.slice(t * per, (t + 1) * per)
+      if (part.length === 0) continue
+      const result = await commitImport(
+        {
+          subject: { kind: "new", name: "Lorem" },
+          topic: { kind: "new", name: `Ipsum ${t + 1}` },
+        },
+        part,
+        0,
+        startMs
+      )
+      added += result.added
+    }
+    return { added, invalid: invalid.length }
+  })
   const cardIds = (await db.cards.toCollection().primaryKeys()) as string[]
   const topic = (await db.decks.toArray()).find((d) => d.parentId !== null)
   const subject = (await db.decks.toArray()).find((d) => d.parentId === null)
@@ -279,10 +324,43 @@ export async function runBrowserSim(options: BrowserSimOptions) {
 
   // 2. Restore from the backup file into an emptied database.
   progress("restoring from backup")
+  if (options.skipRestore) {
+    progress("finished")
+    return {
+      imported: { ms: summary.ms, ...summary.value },
+      violations: sim.violations,
+      reviewsWritten: done,
+      logCount,
+      noteCount,
+      leechNotes,
+      mismatches,
+      checkpoints,
+    }
+  }
   const snap = await readBackupSnapshot()
   const fileText = serializeBackup(
     exportBackup(snap.data, Date.now(), snap.images, snap.settings)
   )
+  // The same bytes as a device sync sends them: chunked, then reassembled, and
+  // as a file read back (the import path). Neither may refuse a big backup.
+  const wire = await time(async () => {
+    const bytes = new TextEncoder().encode(fileText)
+    const begun = Reassembler.begin(bytes.length)
+    if ("error" in begun) return { ok: false, error: begun.error }
+    let last: ReturnType<typeof begun.push> = { status: "more" }
+    for (const chunk of splitChunks(bytes)) last = begun.push(chunk)
+    let identical = last.status === "done" && last.bytes.length === bytes.length
+    if (last.status === "done") {
+      for (let i = 0; i < bytes.length && identical; i += 1) {
+        if (last.bytes[i] !== bytes[i]) identical = false
+      }
+    }
+    const fileBack = await new Blob([bytes], {
+      type: "application/json",
+    }).text()
+    return { ok: identical && fileBack.length === fileText.length }
+  })
+  const fileMB = fileText.length / 1e6
   const before = JSON.stringify(
     stored
       .map((c) => ({
@@ -304,6 +382,8 @@ export async function runBrowserSim(options: BrowserSimOptions) {
       .sort((a, b) => (a.id < b.id ? -1 : 1))
   )
   const restored = {
+    fileMB: Math.round(fileMB * 10) / 10,
+    wire: { ...wire.value, ms: wire.ms },
     ms: restore.ms,
     sameCards: before === after,
     logs: await db.revlog.count(),

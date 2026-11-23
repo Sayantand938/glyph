@@ -3,7 +3,6 @@ import * as React from "react"
 import { importBackup } from "@/db/repo"
 import { readBackupSnapshot } from "@/db/queries"
 import {
-  MAX_BACKUP_BYTES,
   backupFilename,
   exportBackup,
   formatMergeSummary,
@@ -50,7 +49,12 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
       } catch (error) {
         console.error("Backup failed", error)
         onNotice({
-          text: error instanceof Error ? error.message : "The backup failed.",
+          text:
+            error instanceof RangeError
+              ? "This device ran out of memory handling the backup."
+              : error instanceof Error
+                ? error.message
+                : "The backup failed.",
           tone: "error",
         })
       } finally {
@@ -81,12 +85,6 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
   const importFile = React.useCallback(
     (file: File) =>
       run(async () => {
-        if (file.size > MAX_BACKUP_BYTES) {
-          return {
-            text: "That file is too large to be a backup.",
-            tone: "error",
-          }
-        }
         const parsed = parseBackup(await file.text())
         if (!parsed.ok) return { text: parsed.error, tone: "error" }
         const stats = await importBackup(parsed.backup)

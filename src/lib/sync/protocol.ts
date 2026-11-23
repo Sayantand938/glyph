@@ -1,5 +1,3 @@
-import { MAX_BACKUP_BYTES } from "@/lib/backup"
-
 /**
  * The wire format of a sync, over one ordered WebRTC data channel. Each side
  * sends its whole backup as bytes: a `hello` text message with the byte count,
@@ -74,8 +72,9 @@ export type PushResult =
 
 /**
  * Collects the chunks of one backup. `bytes` is what the `hello` promised; more
- * data than that, or a promise above the backup size cap, is an error (the
- * other device is broken or hostile, and memory must not grow unbounded).
+ * data than that is an error. There is no size cap: a backup grows with every
+ * review and must always be able to sync. Only what this device cannot hold is
+ * refused (the allocation fails), as an error rather than a crash.
  */
 export class Reassembler {
   private readonly buffer: Uint8Array
@@ -85,12 +84,15 @@ export class Reassembler {
     this.buffer = new Uint8Array(total)
   }
 
-  static begin(
-    total: number,
-    max = MAX_BACKUP_BYTES
-  ): Reassembler | { error: string } {
-    if (total > max) return { error: "The other device's data is too large." }
-    return new Reassembler(total)
+  static begin(total: number): Reassembler | { error: string } {
+    try {
+      return new Reassembler(total)
+    } catch {
+      return {
+        error:
+          "This device does not have enough memory to receive the other device's data.",
+      }
+    }
   }
 
   /** True once nothing more is expected (an empty backup is complete at once). */

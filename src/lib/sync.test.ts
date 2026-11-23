@@ -144,9 +144,11 @@ describe("chunks", () => {
     expect("push" in r && r.complete).toBe(true)
   })
 
-  it("refuses a promise above the cap", () => {
-    expect("error" in Reassembler.begin(101, 100)).toBe(true)
-    expect("push" in Reassembler.begin(100, 100)).toBe(true)
+  it("has no size cap, and only refuses what cannot be allocated", () => {
+    // No size cap: a large promise is accepted...
+    expect("push" in Reassembler.begin(150 * 1024 * 1024)).toBe(true)
+    // ...and only what this device cannot allocate is an error, never a throw.
+    expect("error" in Reassembler.begin(2 ** 50)).toBe(true)
   })
 
   it("rejects more data than was promised", () => {

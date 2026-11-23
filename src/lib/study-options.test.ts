@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_STUDY_OPTIONS,
-  MAX_NEW_LIMIT,
   parseNewLimit,
   parseStudyOptions,
   sessionSize,
@@ -14,10 +13,14 @@ describe("parseNewLimit", () => {
     expect(parseNewLimit("   ")).toBeNull()
   })
 
-  it("reads whole numbers and clamps them", () => {
+  it("reads whole numbers as typed, with no upper cap", () => {
     expect(parseNewLimit("0")).toBe(0)
     expect(parseNewLimit(" 25 ")).toBe(25)
-    expect(parseNewLimit("99999999")).toBe(MAX_NEW_LIMIT)
+    expect(parseNewLimit("99999999")).toBe(99_999_999)
+  })
+
+  it("starts with no limit", () => {
+    expect(DEFAULT_STUDY_OPTIONS.newLimit).toBeNull()
   })
 
   it("rejects anything else", () => {

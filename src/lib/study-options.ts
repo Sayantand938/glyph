@@ -10,14 +10,12 @@ export interface StudyOptions extends QueueGroups {
   newLimit: number | null
 }
 
-/** Upper bound for the limit box (a typo like 99999999 is clamped to it). */
-export const MAX_NEW_LIMIT = 9999
-
+/** Everything on and no limit: a new-card limit is only ever the user's own choice. */
 export const DEFAULT_STUDY_OPTIONS: StudyOptions = {
   due: true,
   learning: true,
   new: true,
-  newLimit: 30,
+  newLimit: null,
 }
 
 /** Reads stored options; anything malformed gives null (use the defaults). */
@@ -43,14 +41,14 @@ export function parseStudyOptions(value: unknown): StudyOptions | null {
 
 /**
  * Turns the text of the limit box into a limit: empty means no limit (null), a
- * whole number is clamped to 0..MAX_NEW_LIMIT, anything else is undefined (not
- * a usable value yet).
+ * whole number is taken as typed (only kept inside the range JavaScript can
+ * count exactly), anything else is undefined (not a usable value yet).
  */
 export function parseNewLimit(text: string): number | null | undefined {
   const trimmed = text.trim()
   if (trimmed === "") return null
   if (!/^\d+$/.test(trimmed)) return undefined
-  return Math.min(MAX_NEW_LIMIT, Number(trimmed))
+  return Math.min(Number.MAX_SAFE_INTEGER, Number(trimmed))
 }
 
 /** The number of cards a session with these options would contain. */

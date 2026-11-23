@@ -10,7 +10,6 @@ export { formatMergeSummary } from "./summary"
 export {
   BACKUP_APP,
   BACKUP_SCHEMA_VERSION,
-  MAX_BACKUP_BYTES,
   type BackupData,
   type MergeResult,
   type MergeStats,

@@ -16,18 +16,12 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import { State } from "@/db/scheduler"
-import { AUTO_FIT_STEP, buildSequences, optimizeWeights } from "@/lib/fsrs"
-import { shouldAutoFit } from "@/lib/fsrs/auto"
+import { AUTO_FIT_STEP } from "@/lib/fsrs"
 import { noteId } from "@/lib/hash"
 import { parseImportText, validateRows } from "@/lib/importer"
 
-import {
-  simulate,
-  simulateAdaptive,
-  type Scenario,
-  type SimResult,
-  type WeightsRef,
-} from "./simulate"
+import { runAdaptive } from "./refit-driver"
+import { simulate, type Scenario, type SimResult } from "./simulate"
 
 const REPORT_FILE = process.env.SIM_REPORT
 const DAYS = 730
@@ -102,46 +96,6 @@ function averaged(all: Metrics[]): Metrics {
   return out
 }
 
-/** The app's refit rule, run between simulated days. */
-async function runAdaptive(scenario: Scenario) {
-  const weights: WeightsRef = { current: undefined }
-  let lastFitReviews = 0
-  const attempts: string[] = []
-  let adopted = 0
-  let seconds = 0
-  const result = await simulateAdaptive(
-    scenario,
-    weights,
-    async ({ day, logs }) => {
-      if (
-        !shouldAutoFit({ enabled: true, reviews: logs.length, lastFitReviews })
-      ) {
-        return
-      }
-      lastFitReviews = logs.length
-      const records = logs.map(({ cardId, reviewedAt, rating, state }) => ({
-        cardId,
-        reviewedAt,
-        rating,
-        state,
-      }))
-      const t0 = performance.now()
-      const fit = await optimizeWeights(buildSequences(records), {
-        baseline: weights.current,
-      })
-      seconds += (performance.now() - t0) / 1000
-      if (fit.status === "done" && fit.improved) {
-        weights.current = fit.weights
-        adopted += 1
-        attempts.push(
-          `day ${day} (${logs.length} reviews): adopted, held-out logloss ${fit.before.logLoss.toFixed(4)} -> ${fit.after.logLoss.toFixed(4)}`
-        )
-      }
-    }
-  )
-  return { result, adopted, seconds, attempts, weights: weights.current }
-}
-
 const learners: { name: string; scenario: Scenario }[] = [
   { name: "average, honest", scenario: { ...base } },
   { name: "strong memory (skill 2)", scenario: { ...base, skill: 2 } },
@@ -178,7 +132,15 @@ describe.skipIf(!process.env.SIM_CLOSED_LOOP)("closed-loop refit", () => {
             `\n    ${shrank.length} intervals shrank on a pass right after a weight change, ${run.adopted} fits adopted, ${run.seconds.toFixed(0)} s of optimizer time, final weights ${run.weights ? run.weights.map((w) => w.toFixed(2)).join(" ") : "default"}`
         )
         if (seed === 41)
-          out.push(...run.attempts.slice(0, 6).map((a) => "    " + a))
+          out.push(
+            ...run.attempts
+              .filter((a) => a.adopted)
+              .slice(0, 6)
+              .map(
+                (a) =>
+                  `    day ${a.day} (${a.reviews} reviews): adopted, held-out logloss ${a.logLossBefore?.toFixed(4)} -> ${a.logLossAfter?.toFixed(4)}`
+              )
+          )
       }
       out.push(line("auto refit (2 seeds)", averaged(adaptive)))
       out.push(

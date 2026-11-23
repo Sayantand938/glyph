@@ -9,7 +9,6 @@ export const BACKUP_APP = "mcq-srs"
  * notes, unmarked cards, no settings); before 5 their review rows are dropped.
  */
 export const BACKUP_SCHEMA_VERSION = 6
-export const MAX_BACKUP_BYTES = 100 * 1024 * 1024
 
 /** The four tables, without the file envelope. */
 export interface BackupData {
