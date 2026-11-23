@@ -5,6 +5,7 @@ import {
   filterCounts,
   filterRows,
   formatDue,
+  flagCounts,
   isDueRow,
   makeBrowseRow,
   noteAsJson,
@@ -240,6 +241,9 @@ describe("filters", () => {
       review: 3,
       due: 4,
       lapsed: 1,
+      flagged: 0,
+      suspended: 0,
+      buried: 0,
     })
   })
 
@@ -485,5 +489,83 @@ describe("noteAsJson", () => {
     )
     expect(data.question).toBe('Solve $x^2 = 4$ for "x"\nShow work.')
     expect(data.options.A).toBe("\\(2\\)")
+  })
+})
+
+describe("flags, suspended and buried cards", () => {
+  const rows = [
+    row({ id: "plain" }, { state: 2, due: NOW - DAY }),
+    row({ id: "red" }, { state: 2, due: NOW - DAY, flag: 1 }),
+    row({ id: "blue" }, { state: 0, flag: 4 }),
+    row({ id: "susp" }, { state: 2, due: NOW - DAY, suspended: true }),
+    row(
+      { id: "buried" },
+      { state: 2, due: NOW - DAY, buriedUntil: NOW + HOUR }
+    ),
+    row(
+      { id: "was-buried" },
+      { state: 2, due: NOW - DAY, buriedUntil: NOW - 1 }
+    ),
+  ]
+  const ids = (filter: Parameters<typeof filterRows>[1]["filter"]) =>
+    filterRows(rows, { query: "", filter }, NOW).map((r) => r.id)
+
+  it("reads the marks from the card, unmarked when absent", () => {
+    expect(rows[1]).toMatchObject({ flag: 1, suspended: false, buriedUntil: 0 })
+    expect(rows[3].suspended).toBe(true)
+    const none = makeBrowseRow(note(), undefined, "T", "S")
+    expect(none).toMatchObject({ flag: 0, suspended: false, buriedUntil: 0 })
+  })
+
+  it("filters flagged, suspended and buried rows", () => {
+    expect(ids("flagged")).toEqual(["red", "blue"])
+    expect(ids("suspended")).toEqual(["susp"])
+    expect(ids("buried")).toEqual(["buried"])
+  })
+
+  it("keeps hidden rows out of Due, matching the dashboard", () => {
+    expect(ids("due")).toEqual(["plain", "red", "was-buried"])
+    const counts = countCards(
+      rows.map((r) => ({ ...r, cardId: r.id })),
+      NOW
+    )
+    expect(ids("due")).toHaveLength(counts.due + counts.learning)
+    expect(isDueRow({ state: 2, due: NOW - DAY, suspended: true }, NOW)).toBe(
+      false
+    )
+  })
+
+  it("filters by flag colour (any of the chosen flags)", () => {
+    const by = (flags: number[]) =>
+      filterRows(rows, { query: "", filter: "all", flags }, NOW).map(
+        (r) => r.id
+      )
+    expect(by([1])).toEqual(["red"])
+    expect(by([1, 4])).toEqual(["red", "blue"])
+    expect(by([])).toHaveLength(rows.length)
+  })
+
+  it("counts every filter, including the new ones", () => {
+    expect(filterCounts(rows, NOW)).toMatchObject({
+      flagged: 2,
+      suspended: 1,
+      buried: 1,
+    })
+  })
+
+  it("counts rows per flag, leaving out unused flags", () => {
+    const more = [...rows, row({ id: "red2" }, { flag: 1 })]
+    expect(flagCounts(more)).toEqual([
+      { flag: 1, count: 2 },
+      { flag: 4, count: 1 },
+    ])
+    expect(flagCounts([])).toEqual([])
+  })
+
+  it("sorts flagged rows first, by colour, and unflagged last", () => {
+    const asc = sortRows(rows, "flag", "asc").map((r) => r.id)
+    expect(asc.slice(0, 2)).toEqual(["red", "blue"])
+    const desc = sortRows(rows, "flag", "desc").map((r) => r.id)
+    expect(desc.slice(-2)).toEqual(["blue", "red"])
   })
 })

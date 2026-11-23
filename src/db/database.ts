@@ -1,5 +1,7 @@
 import Dexie, { type Table } from "dexie"
 
+import { marksOf, type CardMarks } from "@/lib/card-marks"
+
 import { seedIfEmpty } from "./seed"
 import type { CardRow, Deck, ImageRow, Note, RevlogRow } from "./types"
 
@@ -32,6 +34,18 @@ export class GlyphDB extends Dexie {
           .toCollection()
           .modify((note: { tags?: string[] }) => {
             if (!Array.isArray(note.tags)) note.tags = []
+          })
+      )
+    // Card marks (flag, suspend, bury): plain fields on the card row, filtered in
+    // JS, so there is no new index. Cards from before are unmarked.
+    this.version(4)
+      .stores({})
+      .upgrade((tx) =>
+        tx
+          .table("cards")
+          .toCollection()
+          .modify((card: Partial<CardMarks>) => {
+            Object.assign(card, marksOf(card))
           })
       )
   }

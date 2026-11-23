@@ -1,3 +1,5 @@
+import type { CardMarks } from "@/lib/card-marks"
+
 export interface Deck {
   id: string
   /** null = Subject, string = Topic */
@@ -22,7 +24,12 @@ export interface Note {
   deletedAt: number | null
 }
 
-export interface CardRow {
+/**
+ * One card per note. Besides the FSRS fields it carries the card marks (flag,
+ * suspended, buriedUntil, markedAt; see lib/card-marks.ts), which a review
+ * never changes.
+ */
+export interface CardRow extends CardMarks {
   /** === noteId (strict 1:1) */
   cardId: string
   noteId: string

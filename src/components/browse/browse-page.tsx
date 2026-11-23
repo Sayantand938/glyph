@@ -11,7 +11,9 @@ import { DeleteNotePage } from "@/components/delete-note-page"
 import type { StudyScope } from "@/components/deck-tree"
 import { EditNotePage } from "@/components/edit-note-page"
 import { Button } from "@/components/ui/button"
+import { FlagGlyph } from "@/components/flag-icon"
 import { loadBrowseItems } from "@/db/queries"
+import { buryCard, setFlag, setSuspended, unburyCard } from "@/db/repo"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
 import { useScrollRestore } from "@/hooks/use-scroll-restore"
 import {
@@ -19,12 +21,14 @@ import {
   defaultDirection,
   filterCounts,
   filterRows,
+  flagCounts,
   noteAsJson,
   sortRows,
   type BrowseFilter,
   type BrowseSort,
   type SortDirection,
 } from "@/lib/browse"
+import { flagName, isBuried } from "@/lib/card-marks"
 import { tagCounts } from "@/lib/tags"
 
 import { BrowseListRow } from "./browse-row"
@@ -38,6 +42,7 @@ const inputClass =
   "h-8 rounded-lg border border-input bg-background px-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 
 const COLUMNS: { label: string; sort: BrowseSort; align?: "right" }[] = [
+  { label: "Flag", sort: "flag" },
   { label: "No.", sort: "number" },
   { label: "Question", sort: "question" },
   { label: "Topic", sort: "topic" },
@@ -128,6 +133,7 @@ export function BrowsePage({
   const [sort, setSort] = React.useState<BrowseSort>("number")
   const [direction, setDirection] = React.useState<SortDirection>("asc")
   const [selectedTags, setSelectedTags] = React.useState<string[]>([])
+  const [selectedFlags, setSelectedFlags] = React.useState<number[]>([])
   const [limit, setLimit] = React.useState(PAGE_SIZE)
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
@@ -153,6 +159,16 @@ export function BrowsePage({
   useScrollRestore(editingNote !== null || deletingNote !== null)
   const counts = React.useMemo(() => filterCounts(rows, now), [rows, now])
   const tags = React.useMemo(() => tagCounts(rows.map((r) => r.tags)), [rows])
+  const flags = React.useMemo(() => flagCounts(rows), [rows])
+  const rowById = React.useMemo(
+    () => new Map(rows.map((r) => [r.id, r])),
+    [rows]
+  )
+  // A selected flag that no question carries any more (cleared) is ignored.
+  const activeFlags = React.useMemo(
+    () => selectedFlags.filter((f) => flags.some((x) => x.flag === f)),
+    [selectedFlags, flags]
+  )
   // A selected tag that no question carries any more (edited away) is ignored.
   const activeTags = React.useMemo(
     () => selectedTags.filter((t) => tags.some((x) => x.tag === t)),
@@ -161,11 +177,15 @@ export function BrowsePage({
   const shown = React.useMemo(
     () =>
       sortRows(
-        filterRows(rows, { query, filter, tags: activeTags }, now),
+        filterRows(
+          rows,
+          { query, filter, tags: activeTags, flags: activeFlags },
+          now
+        ),
         sort,
         direction
       ),
-    [rows, query, filter, activeTags, now, sort, direction]
+    [rows, query, filter, activeTags, activeFlags, now, sort, direction]
   )
 
   function toggleTag(tag: string) {
@@ -175,6 +195,42 @@ export function BrowsePage({
         : [...current, tag]
     )
     setLimit(PAGE_SIZE)
+  }
+
+  function toggleFlagFilter(flag: number) {
+    setSelectedFlags((current) =>
+      current.includes(flag)
+        ? current.filter((f) => f !== flag)
+        : [...current, flag]
+    )
+    setLimit(PAGE_SIZE)
+  }
+
+  /** Runs a card-mark write; a failure shows in the message line like a failed copy. */
+  async function mark(action: () => Promise<void>, failure: string) {
+    try {
+      await action()
+    } catch {
+      setMessage({ text: failure, error: true })
+    }
+  }
+
+  function flagRow(id: string, flag: number) {
+    void mark(() => setFlag(id, flag), "Could not set the flag.")
+  }
+
+  function suspendRow(id: string) {
+    const suspended = rowById.get(id)?.suspended ?? false
+    void mark(() => setSuspended(id, !suspended), "Could not update the card.")
+  }
+
+  function buryRow(id: string) {
+    const row = rowById.get(id)
+    const buried = row ? isBuried(row, now) : false
+    void mark(
+      () => (buried ? unburyCard(id) : buryCard(id)),
+      "Could not update the card."
+    )
   }
 
   function chooseSort(next: BrowseSort) {
@@ -227,7 +283,10 @@ export function BrowsePage({
 
   const title = scope ? scope.name : "All questions"
   const filtering =
-    query.trim() !== "" || filter !== "all" || activeTags.length > 0
+    query.trim() !== "" ||
+    filter !== "all" ||
+    activeTags.length > 0 ||
+    activeFlags.length > 0
 
   return (
     <div className="flex flex-col gap-3 py-4">
@@ -342,6 +401,36 @@ export function BrowsePage({
             </div>
           )}
 
+          {flags.length > 0 && (
+            <div
+              role="group"
+              aria-label="Filter by flag"
+              className="-mx-1 flex [scrollbar-width:none] items-center gap-1.5 overflow-x-auto px-1 pb-1 [&::-webkit-scrollbar]:hidden"
+            >
+              <span className="shrink-0 text-xs text-muted-foreground">
+                Flags
+              </span>
+              {flags.map(({ flag, count }) => {
+                const on = activeFlags.includes(flag)
+                return (
+                  <Button
+                    key={flag}
+                    variant={on ? "default" : "outline"}
+                    size="sm"
+                    className="shrink-0"
+                    aria-pressed={on}
+                    aria-label={`${flagName(flag)} flag, ${count}`}
+                    title={`${flagName(flag)} flag`}
+                    onClick={() => toggleFlagFilter(flag)}
+                  >
+                    <FlagGlyph flag={flag} labelled={false} />
+                    <span className="tabular-nums opacity-70">{count}</span>
+                  </Button>
+                )
+              })}
+            </div>
+          )}
+
           {shown.length === 0 ? (
             <div className="flex flex-col items-start gap-2 py-4 text-sm">
               <p className="text-muted-foreground">
@@ -355,6 +444,7 @@ export function BrowsePage({
                   setQuery("")
                   setFilter("all")
                   setSelectedTags([])
+                  setSelectedFlags([])
                 }}
               >
                 Clear search and filters
@@ -397,6 +487,9 @@ export function BrowsePage({
                         onEdit={setEditingId}
                         onCopy={(id) => void copyQuestion(id)}
                         onDelete={setDeletingId}
+                        onFlag={flagRow}
+                        onSuspend={suspendRow}
+                        onBury={buryRow}
                       />
                     ))}
                   </tbody>

@@ -45,6 +45,32 @@ describe("emptyCardRow", () => {
   it("maps a never-reviewed card to an absent last_review", () => {
     expect(rowToCard(emptyCardRow(note, NOW)).last_review).toBeUndefined()
   })
+
+  it("starts unmarked", () => {
+    expect(emptyCardRow(note, NOW)).toMatchObject({
+      flag: 0,
+      suspended: false,
+      buriedUntil: 0,
+      markedAt: 0,
+    })
+  })
+
+  it("keeps the card marks through grading", () => {
+    const marked = {
+      ...emptyCardRow(note, NOW),
+      flag: 3,
+      suspended: true,
+      buriedUntil: NOW + DAY,
+      markedAt: NOW - 5,
+    }
+    const graded = grade(marked, Rating.Good, NOW).row
+    expect(graded).toMatchObject({
+      flag: 3,
+      suspended: true,
+      buriedUntil: NOW + DAY,
+      markedAt: NOW - 5,
+    })
+  })
 })
 
 describe("grade", () => {

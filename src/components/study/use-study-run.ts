@@ -2,11 +2,19 @@ import * as React from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { loadStudyCard, loadStudyCards, type StudyCardView } from "@/db/queries"
-import { applyReview, undoReview } from "@/db/repo"
+import {
+  applyReview,
+  buryCard,
+  restoreMarks,
+  setFlag,
+  setSuspended,
+  undoReview,
+} from "@/db/repo"
 import { Rating, previewIntervals, type Grade } from "@/db/scheduler"
 import { useRetention } from "@/hooks/use-retention"
 import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
+import { marksOf, nextDayStart, toggleFlag } from "@/lib/card-marks"
 import { buildQueue } from "@/lib/queue"
 import {
   dropCardFrom,
@@ -18,7 +26,7 @@ import {
 
 import type { StudyScope } from "../deck-tree"
 import { currentTime, dropFocus, errorText, parseBool } from "./helpers"
-import type { Run, UndoEntry } from "./types"
+import type { MarkUndo, Run, UndoEntry } from "./types"
 
 /**
  * State and actions of one study session: builds the queue, follows the
@@ -30,6 +38,8 @@ export function useStudyRun(scope: StudyScope) {
   const [run, setRun] = React.useState<Run | null>(null)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
+  /** A plain confirmation ("Card suspended"), as opposed to `message`, an error. */
+  const [notice, setNotice] = React.useState<string | null>(null)
   const [shuffle, setShuffle] = useStoredState(
     "glyph.shuffleOptions",
     true,
@@ -53,7 +63,13 @@ export function useStudyRun(scope: StudyScope) {
           mixed: scope.kind !== "topic",
         })
         shownAt.current = currentTime()
-        setRun({ queue, index: 0, phase: { kind: "question" }, history: [] })
+        setRun({
+          queue,
+          index: 0,
+          phase: { kind: "question" },
+          history: [],
+          hidden: [],
+        })
       })
       .catch((error: unknown) => {
         if (!cancelled) setLoadError(errorText(error, "Couldn't load cards."))
@@ -107,7 +123,12 @@ export function useStudyRun(scope: StudyScope) {
     run !== null && cardId === null && (run.queue.length > 0 || answered)
   const empty = run !== null && run.queue.length === 0 && !answered
   const lastEntry = run?.history.at(-1)
-  const canUndo = !!lastEntry && lastEntry.undoable
+  // A suspend or bury is undone first, but only while no review came after it.
+  const markUndo =
+    run?.lastMark && run.lastMark.historyLength === run.history.length
+      ? run.lastMark
+      : null
+  const canUndo = markUndo !== null || (!!lastEntry && lastEntry.undoable)
   const summary = summarizeSession(run?.history ?? [])
 
   function pick(slot: number) {
@@ -115,6 +136,7 @@ export function useStudyRun(scope: StudyScope) {
     const picked = order[slot]
     if (picked === undefined) return
     setMessage(null)
+    setNotice(null)
     dropFocus()
 
     if (picked === data.note.correctIndex) {
@@ -174,6 +196,7 @@ export function useStudyRun(scope: StudyScope) {
     const view = data
     busy.current = true
     setMessage(null)
+    setNotice(null)
     try {
       const durationMs = currentTime() - shownAt.current
       const { log } = await applyReview(
@@ -214,6 +237,7 @@ export function useStudyRun(scope: StudyScope) {
 
   function next() {
     if (!run || busy.current || run.phase.kind !== "wrong") return
+    setNotice(null)
     shownAt.current = currentTime()
     setRun({ ...run, index: run.index + 1, phase: { kind: "question" } })
   }
@@ -226,10 +250,15 @@ export function useStudyRun(scope: StudyScope) {
 
   async function undo() {
     if (!run || busy.current) return
+    if (markUndo) {
+      await undoMark(markUndo)
+      return
+    }
     const entry = run.history.at(-1)
     if (!entry || !entry.undoable) return
     busy.current = true
     setMessage(null)
+    setNotice(null)
     dropFocus()
     try {
       const restored = await undoReview(entry.logId, entry.previousRow)
@@ -237,18 +266,115 @@ export function useStudyRun(scope: StudyScope) {
       setRun((r) => {
         if (!r) return r
         const history = r.history.slice(0, -1)
+        // A card suspended or buried since then must not come back with the old queue.
+        const queue = r.hidden.reduce(
+          (q, id) => dropCardFrom(q, entry.index, id),
+          entry.queue
+        )
         return restored
           ? {
-              queue: entry.queue,
+              queue,
               index: entry.index,
               phase: { kind: "question" },
               history,
+              hidden: r.hidden,
+              lastMark: r.lastMark,
             }
           : { ...r, history }
       })
       if (!restored) setMessage("That review can't be undone any more.")
     } catch (error) {
       setMessage(errorText(error, "Couldn't undo that review."))
+    } finally {
+      busy.current = false
+    }
+  }
+
+  /** Takes back the latest suspend or bury: the card returns where it was, in the phase it was in. */
+  async function undoMark(mark: MarkUndo) {
+    busy.current = true
+    setMessage(null)
+    setNotice(null)
+    dropFocus()
+    try {
+      await restoreMarks(mark.cardId, mark.previous)
+      shownAt.current = currentTime()
+      setRun(
+        (r) =>
+          r && {
+            queue: mark.queue,
+            index: mark.index,
+            phase: mark.phase,
+            history: r.history,
+            hidden: r.hidden.filter((id) => id !== mark.cardId),
+          }
+      )
+    } catch (error) {
+      setMessage(errorText(error, "Couldn't undo that."))
+    } finally {
+      busy.current = false
+    }
+  }
+
+  /**
+   * Suspends or buries the current card and moves on: it and its re-queued
+   * copies leave the queue. Answers already given for it stay in the history.
+   */
+  async function hideCurrent(kind: "suspend" | "bury") {
+    if (!run || !data || busy.current) return
+    const current = run
+    const view = data
+    busy.current = true
+    setMessage(null)
+    dropFocus()
+    try {
+      const now = currentTime()
+      const id = view.card.cardId
+      if (kind === "suspend") await setSuspended(id, true, now)
+      else await buryCard(id, now, nextDayStart(now))
+      const undo: MarkUndo = {
+        cardId: id,
+        previous: marksOf(view.card),
+        queue: current.queue,
+        index: current.index,
+        phase: current.phase,
+        historyLength: current.history.length,
+      }
+      shownAt.current = now
+      setNotice(
+        kind === "suspend"
+          ? "Card suspended. Z undoes it."
+          : "Card buried until tomorrow. Z undoes it."
+      )
+      setRun(
+        (r) =>
+          r && {
+            queue: dropCardFrom(r.queue, r.index, id),
+            index: r.index,
+            phase: { kind: "question" },
+            history: r.history,
+            hidden: [...r.hidden, id],
+            lastMark: undo,
+          }
+      )
+    } catch (error) {
+      setMessage(errorText(error, "Couldn't update the card."))
+    } finally {
+      busy.current = false
+    }
+  }
+
+  /** Sets the current card's flag (the same flag again clears it). The card re-reads live, so it shows at once. */
+  async function flagCurrent(flag: number) {
+    if (!data || busy.current) return
+    const id = data.card.cardId
+    busy.current = true
+    setMessage(null)
+    dropFocus()
+    try {
+      await setFlag(id, toggleFlag(data.card.flag, flag))
+    } catch (error) {
+      setMessage(errorText(error, "Couldn't set the flag."))
     } finally {
       busy.current = false
     }
@@ -282,6 +408,7 @@ export function useStudyRun(scope: StudyScope) {
           queue: dropCardFrom(r.queue, r.index, noteId),
           index: r.index,
           phase: { kind: "question" },
+          hidden: r.hidden,
           history: r.history
             .filter((h) => h.cardId !== noteId)
             .map((h) => ({
@@ -296,6 +423,7 @@ export function useStudyRun(scope: StudyScope) {
     run,
     loadError,
     message,
+    notice,
     shuffle,
     setShuffle,
     data,
@@ -311,6 +439,8 @@ export function useStudyRun(scope: StudyScope) {
     next,
     skipGone,
     undo,
+    hideCurrent,
+    flagCurrent,
     disableUndoFor,
     dropDeleted,
   }

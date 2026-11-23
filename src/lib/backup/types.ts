@@ -2,10 +2,11 @@ import type { BackupFile, CardRow, Deck, Note, RevlogRow } from "@/db/types"
 
 export const BACKUP_APP = "mcq-srs"
 /**
- * 2 added `images`; 3 added `tags` on notes. Older files are still accepted
- * (no images, notes without tags).
+ * 2 added `images`; 3 added `tags` on notes; 4 added the card marks (flag,
+ * suspended, buriedUntil, markedAt). Older files are still accepted (no
+ * images, untagged notes, unmarked cards).
  */
-export const BACKUP_SCHEMA_VERSION = 3
+export const BACKUP_SCHEMA_VERSION = 4
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024
 
 /** The four tables, without the file envelope. */

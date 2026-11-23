@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { DeleteNotePage } from "@/components/delete-note-page"
 import { EditNotePage } from "@/components/edit-note-page"
+import { flagBorder } from "@/components/flag-style"
 import { Button } from "@/components/ui/button"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
 
@@ -11,6 +12,7 @@ import { ExitPage } from "./exit-page"
 import { hintFor } from "./helpers"
 import { QuestionView } from "./question-view"
 import { SessionToolbar } from "./session-toolbar"
+import { ShortcutsPage } from "./shortcuts-page"
 import { useStudyKeys } from "./use-study-keys"
 import { useStudyRun } from "./use-study-run"
 
@@ -26,6 +28,9 @@ export function StudySession({
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [confirmExit, setConfirmExit] = React.useState(false)
+  const [help, setHelp] = React.useState(false)
+  // While the flag menu is open it handles its own keys (Escape closes it).
+  const [menuOpen, setMenuOpen] = React.useState(false)
 
   /** Leaves at once when nothing is in progress; otherwise asks first. */
   function requestExit(): boolean {
@@ -42,7 +47,13 @@ export function StudySession({
   useHistoryLayer(requestExit)
 
   useStudyKeys({
-    active: run !== null && !editing && !deleting && !confirmExit,
+    active:
+      run !== null &&
+      !editing &&
+      !deleting &&
+      !confirmExit &&
+      !help &&
+      !menuOpen,
     phase: run?.phase.kind ?? null,
     empty: s.empty,
     finished: s.finished,
@@ -56,6 +67,10 @@ export function StudySession({
     onNext: s.next,
     onSkipGone: s.skipGone,
     onGrade: (rating) => void s.gradeRight(rating),
+    onSuspend: () => void s.hideCurrent("suspend"),
+    onBury: () => void s.hideCurrent("bury"),
+    onFlag: (flag) => void s.flagCurrent(flag),
+    onHelp: () => setHelp(true),
   })
 
   if (s.loadError) {
@@ -103,6 +118,7 @@ export function StudySession({
   if (confirmExit) {
     return <ExitPage onStay={() => setConfirmExit(false)} onLeave={onExit} />
   }
+  if (help) return <ShortcutsPage onClose={() => setHelp(false)} />
 
   const counter = s.empty
     ? scope.name
@@ -116,16 +132,29 @@ export function StudySession({
         shuffle={s.shuffle}
         canUndo={s.canUndo}
         canEdit={!!data && !s.finished && !s.empty}
+        flag={data?.card.flag ?? 0}
+        suspended={data?.card.suspended ?? false}
         onExit={requestExit}
         onToggleShuffle={() => s.setShuffle(!s.shuffle)}
         onUndo={() => void s.undo()}
         onEdit={() => setEditing(true)}
         onDelete={() => setDeleting(true)}
+        onFlag={(flag) => void s.flagCurrent(flag)}
+        onSuspend={() => void s.hideCurrent("suspend")}
+        onBury={() => void s.hideCurrent("bury")}
+        onHelp={() => setHelp(true)}
+        onMenuOpenChange={setMenuOpen}
       />
 
       {s.message && (
         <p role="alert" className="rounded-lg border p-3 text-sm">
           {s.message}
+        </p>
+      )}
+
+      {s.notice && (
+        <p role="status" className="rounded-lg border px-3 py-2 text-xs">
+          {s.notice}
         </p>
       )}
 
@@ -145,16 +174,24 @@ export function StudySession({
           Loading...
         </p>
       ) : (
-        <QuestionView
-          key={run.index}
-          data={data}
-          order={s.order}
-          phase={run.phase}
-          intervals={s.intervals}
-          onPick={s.pick}
-          onNext={s.next}
-          onGrade={(rating) => void s.gradeRight(rating)}
-        />
+        <div
+          className={
+            data.card.flag > 0
+              ? `border-l-4 pl-3 ${flagBorder(data.card.flag)}`
+              : undefined
+          }
+        >
+          <QuestionView
+            key={run.index}
+            data={data}
+            order={s.order}
+            phase={run.phase}
+            intervals={s.intervals}
+            onPick={s.pick}
+            onNext={s.next}
+            onGrade={(rating) => void s.gradeRight(rating)}
+          />
+        </div>
       )}
 
       {!s.empty && !s.finished && (

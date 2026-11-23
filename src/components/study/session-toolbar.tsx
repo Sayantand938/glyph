@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  FlagIcon,
   KeyboardIcon,
   PencilIcon,
   ShuffleIcon,
@@ -7,7 +8,15 @@ import {
   Undo2Icon,
 } from "lucide-react"
 
+import { CardMarkItems } from "@/components/card-mark-items"
+import { FlagGlyph } from "@/components/flag-icon"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { flagName } from "@/lib/card-marks"
 
 import { KEYBOARD_HELP } from "./helpers"
 
@@ -17,22 +26,38 @@ export function SessionToolbar({
   shuffle,
   canUndo,
   canEdit,
+  flag,
+  suspended,
   onExit,
   onToggleShuffle,
   onUndo,
   onEdit,
   onDelete,
+  onFlag,
+  onSuspend,
+  onBury,
+  onHelp,
+  onMenuOpenChange,
 }: {
   scopeName: string
   counter: string
   shuffle: boolean
   canUndo: boolean
   canEdit: boolean
+  /** The current card's flag (0 = none) and whether it is suspended. */
+  flag: number
+  suspended: boolean
   onExit: () => void
   onToggleShuffle: () => void
   onUndo: () => void
   onEdit: () => void
   onDelete: () => void
+  onFlag: (flag: number) => void
+  onSuspend: () => void
+  onBury: () => void
+  onHelp: () => void
+  /** The flag menu opened or closed; the session's shortcuts pause while it is open. */
+  onMenuOpenChange: (open: boolean) => void
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -65,7 +90,7 @@ export function SessionToolbar({
       <Button
         variant="ghost"
         size="icon"
-        aria-label="Undo last answer"
+        aria-label="Undo last action"
         title="Undo (Z)"
         disabled={!canUndo}
         onClick={onUndo}
@@ -82,6 +107,32 @@ export function SessionToolbar({
       >
         <PencilIcon />
       </Button>
+      <DropdownMenu onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger
+          render={<Button variant="ghost" size="icon" />}
+          disabled={!canEdit}
+          aria-label={
+            flag > 0
+              ? `Flag, suspend or bury (flagged ${flagName(flag)})`
+              : "Flag, suspend or bury"
+          }
+          title="Flag, suspend or bury"
+        >
+          {flag > 0 ? <FlagGlyph flag={flag} labelled={false} /> : <FlagIcon />}
+        </DropdownMenuTrigger>
+        {/* Focus is not handed back to the button, or Space would reopen the menu. */}
+        <DropdownMenuContent finalFocus={false}>
+          <CardMarkItems
+            shortcuts
+            flag={flag}
+            suspended={suspended}
+            buried={false}
+            onFlag={onFlag}
+            onSuspend={onSuspend}
+            onBury={onBury}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         variant="ghost"
         size="icon"
@@ -92,12 +143,20 @@ export function SessionToolbar({
       >
         <Trash2Icon />
       </Button>
-      <span
-        className="flex size-8 items-center justify-center text-muted-foreground"
+      {/* Shortcuts are for a physical keyboard, so the button is for wider screens. */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden sm:inline-flex"
+        aria-label="Keyboard shortcuts"
         title={KEYBOARD_HELP}
+        onClick={(e) => {
+          e.currentTarget.blur()
+          onHelp()
+        }}
       >
-        <KeyboardIcon className="size-4" aria-label="Keyboard shortcuts" />
-      </span>
+        <KeyboardIcon />
+      </Button>
     </div>
   )
 }

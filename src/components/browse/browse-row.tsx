@@ -5,14 +5,18 @@ import {
   Trash2Icon,
 } from "lucide-react"
 
+import { CardMarkItems } from "@/components/card-mark-items"
+import { FlagGlyph } from "@/components/flag-icon"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatDue, stateLabel, type BrowseRow } from "@/lib/browse"
+import { isBuried } from "@/lib/card-marks"
 
 const STATE_STYLE: Record<number, string> = {
   0: "border-border",
@@ -27,6 +31,15 @@ function StateBadge({ state }: { state: number }) {
       className={`rounded border px-1 text-[0.7rem] leading-4 ${STATE_STYLE[state] ?? "border-border"}`}
     >
       {stateLabel(state)}
+    </span>
+  )
+}
+
+/** Suspended / buried: why a card is not being studied, next to its state. */
+function HiddenBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded border border-amber-500/60 px-1 text-[0.7rem] leading-4 text-amber-700 dark:text-amber-400">
+      {label}
     </span>
   )
 }
@@ -86,6 +99,9 @@ export function BrowseListRow({
   onEdit,
   onCopy,
   onDelete,
+  onFlag,
+  onSuspend,
+  onBury,
 }: {
   row: BrowseRow
   /** "Physics > Mechanics" for a mixed list, the topic name inside one Subject or Topic. */
@@ -98,11 +114,31 @@ export function BrowseListRow({
   onEdit: (id: string) => void
   onCopy: (id: string) => void
   onDelete: (id: string) => void
+  /** 0 clears the flag. */
+  onFlag: (id: string, flag: number) => void
+  /** Suspends the card, or unsuspends it if it is suspended. */
+  onSuspend: (id: string) => void
+  /** Buries the card until tomorrow, or unburies it if it is buried. */
+  onBury: (id: string) => void
 }) {
   const preview = row.preview || "(empty question)"
+  const buried = isBuried(row, now)
 
   return (
-    <tr className="border-b last:border-b-0 hover:bg-muted/40">
+    <tr
+      className={`border-b last:border-b-0 hover:bg-muted/40 ${
+        row.suspended ? "bg-amber-500/10" : buried ? "bg-muted/50" : ""
+      }`}
+    >
+      <td className={`${cell} w-8`}>
+        {row.flag > 0 ? (
+          <FlagGlyph flag={row.flag} className="size-4" />
+        ) : (
+          <span className="text-xs text-muted-foreground" aria-label="No flag">
+            -
+          </span>
+        )}
+      </td>
       <td className={`${cell} text-xs whitespace-nowrap text-muted-foreground`}>
         {row.sl === "" ? "-" : row.sl}
       </td>
@@ -116,7 +152,11 @@ export function BrowseListRow({
         <TagChips tags={row.tags} active={activeTags} onTag={onTag} />
       </td>
       <td className={cell}>
-        <StateBadge state={row.state} />
+        <span className="flex flex-wrap gap-1">
+          <StateBadge state={row.state} />
+          {row.suspended && <HiddenBadge label="Suspended" />}
+          {buried && <HiddenBadge label="Buried" />}
+        </span>
       </td>
       <td className={`${cell} text-xs whitespace-nowrap`}>
         {formatDue(row, now)}
@@ -148,6 +188,16 @@ export function BrowseListRow({
               <CopyIcon aria-hidden />
               Copy as JSON
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <CardMarkItems
+              flag={row.flag}
+              suspended={row.suspended}
+              buried={buried}
+              onFlag={(flag) => onFlag(row.id, flag)}
+              onSuspend={() => onSuspend(row.id)}
+              onBury={() => onBury(row.id)}
+            />
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onDelete(row.id)}>
               <Trash2Icon aria-hidden />
               Delete
