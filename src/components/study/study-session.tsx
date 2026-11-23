@@ -132,7 +132,12 @@ export function StudySession({
       {s.empty ? (
         <EmptyState scopeName={scope.name} onExit={onExit} />
       ) : s.finished ? (
-        <FinishedState summary={s.summary} onExit={onExit} />
+        <FinishedState
+          summary={s.summary}
+          records={run.history}
+          scopeName={scope.name}
+          onExit={onExit}
+        />
       ) : s.gone ? (
         <GoneState onSkip={s.skipGone} />
       ) : !data ? (
