@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current version: 0.2.0** (the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 368 tests pass; typecheck, lint and build are clean. Added in v0.2.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"), and a study options page (see "Study options"). The Next.js → Vite migration is complete.
+**Current version: 0.3.0** (the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 371 tests pass; typecheck, lint and build are clean. Added in v0.2.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"), and a study options page (see "Study options"). Added in v0.3.0: due reviews are asked least stable first (see "Queue order"). The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
