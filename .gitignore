@@ -34,3 +34,7 @@ pnpm-debug.log*
 
 # vercel
 .vercel
+
+# tauri
+/src-tauri/target
+/src-tauri/gen

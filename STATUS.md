@@ -320,6 +320,8 @@ R0-R6 are built (see "Reliability R1-R2 notes" and "Reliability R3-R6 notes" bel
 
 **Open decisions.** Add `fake-indexeddb` as a dev dependency (reason: `importBackup`, `readBackupParts`, the digest, snapshots and `writeAutoBackup` are untestable in Vitest without it; they were checked in the browser instead)? Still open. Decided in R3: the new file extension is `.glyph` (`.jsonl` when the browser cannot gzip); old `.json` files still import. Which real devices R4 and R6 get tested on (Windows only, Android, iPhone) is still open: only desktop Chrome in the app's browser pane was used.
 
+**Tauri desktop shell (2026-11-23).** Added a Tauri 2 shell in `src-tauri/` for Windows, keeping Dexie/IndexedDB (WebView2) and the PWA build for phones. `npm run tauri dev` / `npm run tauri build`. The Tauri build skips the service worker and manifest (see CLAUDE.md Gotchas). Verified: typecheck, lint, tests, `tauri build --no-bundle` succeed and the exe starts. Not verified: the installer bundle, backup download / folder picker / WebRTC sync inside WebView2, and data surviving an app update. The paragraph below predates this and is kept for the SQLite question.
+
 **Why not Tauri now.** Tauri's webviews still use IndexedDB, so on-device storage would mean SQLite and a rewrite of the Dexie layer and `repo/`. It would fix browser storage eviction and give native files, but not the sync protocol gaps (R1, R2), import safety (R5) or card merging (R7); streaming (R3) can be done in the browser. Tauri's mobile support is newer than its desktop support; if a native shell is needed later, Capacitor (the same web app plus native SQLite and filesystem plugins) is the first thing to look at.
 
 ### Reliability R1-R2 notes (built 2026-11-23)

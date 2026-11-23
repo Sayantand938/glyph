@@ -17,6 +17,8 @@ npm run dev        # vite dev server, http://localhost:5173
 npm run build      # tsc --noEmit && vite build (also generates the service worker)
 npm run preview    # serve the production build (use this to test offline/PWA)
 npm test           # vitest run (node environment, src/**/*.test.ts)
+npm run tauri dev  # desktop shell around the dev server (Rust required)
+npm run tauri build # desktop exe + installer; no service worker (see Gotchas)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint .
 npm run format     # prettier --write "**/*.{ts,tsx}"
@@ -58,6 +60,8 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 11. Two-grade scale only: reviews are `Again` (fail) or `Good` (pass), the `Grade` type in `scheduler.ts`. Never add Hard/Easy buttons or write ratings 2/4 (old logs and imported backups may contain them; keep accepting those).
 
 ## Gotchas
+
+- Tauri 2 desktop shell lives in `src-tauri/` (made with `tauri init` and `tauri icon`; only the identifier in `tauri.conf.json` was edited). Data is still IndexedDB inside WebView2. The Tauri CLI sets `TAURI_ENV_PLATFORM`; `vite.config.ts` then drops `vite-plugin-pwa` and aliases `virtual:pwa-register/react` to `src/lib/pwa-register-stub.ts`, so `PwaToast` renders nothing. A plain `npm run build` (Vercel) still builds the PWA.
 
 - Retention, the fitted FSRS weights (`fit`), auto-fit and the leech rule are not localStorage preferences: they are rows in the Dexie `settings` table, read with `useSettings`/`useSetting` (`src/hooks/use-settings.ts`), written with `saveSetting` (`@/db/repo`), and merged key by key (newer `updatedAt`) in backups and device sync. A new synced setting needs an entry in `SETTING_PARSERS` (`src/lib/settings.ts`). Do not add review, learning or new-card caps.
 
