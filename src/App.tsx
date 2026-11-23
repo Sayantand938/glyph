@@ -1,17 +1,20 @@
 import * as React from "react"
+import { SettingsIcon } from "lucide-react"
 
 import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
-import { HeaderMenu } from "@/components/header-menu"
 import { ImportModal } from "@/components/import/import-modal"
 import { PwaToast } from "@/components/pwa-toast"
+import { SettingsPage } from "@/components/settings-page"
 import { StudySession } from "@/components/study/study-session"
+import { Button } from "@/components/ui/button"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { formatSummary } from "@/lib/importer"
 
 export default function App() {
   const [importOpen, setImportOpen] = React.useState(false)
   const [notice, setNotice] = React.useState<Notice | null>(null)
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [studying, setStudying] = React.useState<StudyScope | null>(null)
   const backup = useBackupControls(setNotice)
 
@@ -21,13 +24,18 @@ export default function App() {
         <h1 className="text-base font-semibold tracking-tight">
           glyph<span className="animate-pulse">_</span>
         </h1>
-        {!studying && (
-          <HeaderMenu
-            busy={backup.busy}
-            onImportJson={() => setImportOpen(true)}
-            onExportBackup={() => void backup.exportFile()}
-            onImportBackup={backup.chooseFile}
-          />
+        {!studying && !settingsOpen && (
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Settings"
+            onClick={() => {
+              setNotice(null)
+              setSettingsOpen(true)
+            }}
+          >
+            <SettingsIcon />
+          </Button>
         )}
         {backup.input}
       </header>
@@ -51,6 +59,17 @@ export default function App() {
 
         {studying ? (
           <StudySession scope={studying} onExit={() => setStudying(null)} />
+        ) : settingsOpen ? (
+          <SettingsPage
+            busy={backup.busy}
+            onBack={() => {
+              setNotice(null)
+              setSettingsOpen(false)
+            }}
+            onImportJson={() => setImportOpen(true)}
+            onExportBackup={() => void backup.exportFile()}
+            onImportBackup={backup.chooseFile}
+          />
         ) : (
           <Dashboard
             onImportJson={() => setImportOpen(true)}
