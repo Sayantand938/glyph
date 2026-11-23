@@ -5,9 +5,13 @@ import {
   Reassembler,
   decodePairing,
   encodePairing,
+  endMessage,
   failMessage,
-  helloMessage,
+  hiMessage,
+  okMessage,
   parseMessage,
+  partMessage,
+  planMessage,
   splitChunks,
 } from "@/lib/sync"
 
@@ -80,13 +84,22 @@ describe("pairing codes", () => {
 })
 
 describe("control messages", () => {
-  it("round-trips hello, ok and fail", () => {
-    expect(parseMessage(helloMessage(1234))).toEqual({
-      t: "hello",
-      v: 1,
-      bytes: 1234,
+  const counts = { decks: 2, notes: 3, cards: 3, reviews: 40 }
+
+  it("round-trips every message", () => {
+    expect(parseMessage(hiMessage("dev-1"))).toEqual({
+      t: "hi",
+      v: 2,
+      device: "dev-1",
     })
-    expect(parseMessage('{"t":"ok"}')).toEqual({ t: "ok" })
+    expect(parseMessage(planMessage("delta", 1))).toEqual({
+      t: "plan",
+      mode: "delta",
+      round: 1,
+    })
+    expect(parseMessage(partMessage(1234))).toEqual({ t: "part", bytes: 1234 })
+    expect(parseMessage(endMessage(7))).toEqual({ t: "end", parts: 7 })
+    expect(parseMessage(okMessage(counts))).toEqual({ t: "ok", counts })
     expect(parseMessage(failMessage("nope"))).toEqual({
       t: "fail",
       reason: "nope",
@@ -100,10 +113,16 @@ describe("control messages", () => {
       "null",
       "[]",
       '{"t":"unknown"}',
-      '{"t":"hello","v":2,"bytes":1}',
-      '{"t":"hello","v":1,"bytes":-1}',
-      '{"t":"hello","v":1,"bytes":1.5}',
-      '{"t":"hello","v":1,"bytes":"3"}',
+      '{"t":"hi","v":2}',
+      '{"t":"hi","v":2,"device":""}',
+      '{"t":"plan","mode":"some","round":1}',
+      '{"t":"plan","mode":"full","round":0}',
+      '{"t":"part","bytes":-1}',
+      '{"t":"part","bytes":1.5}',
+      '{"t":"part","bytes":"3"}',
+      '{"t":"end","parts":-2}',
+      '{"t":"ok"}',
+      '{"t":"ok","counts":{"decks":1,"notes":1,"cards":1}}',
     ]) {
       expect(parseMessage(text)).toBeNull()
     }

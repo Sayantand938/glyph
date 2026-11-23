@@ -40,6 +40,16 @@ export interface BrowserSimOptions {
   questions?: number
   /** With `questions`: how many topics (decks) to spread them over. */
   topics?: number
+  /** Called with each measurement as it is made (so a crash loses nothing). */
+  onCheckpoint?: (checkpoint: Checkpoint) => void
+  /**
+   * Write the simulation's final card rows and review log straight into the
+   * database in large batches instead of replaying every review through
+   * `applyReview` (minutes instead of an hour for years of reviews). Only for
+   * building a big database to test everything else on; it does not exercise
+   * the per-review write path.
+   */
+  bulk?: boolean
   /** Skip the restore-from-backup step (it needs a lot of memory on a big log). */
   skipRestore?: boolean
   days?: number
@@ -233,7 +243,7 @@ export async function runBrowserSim(options: BrowserSimOptions) {
       throw new Error(`backup did not parse: ${back.value.error}`)
     }
     const noop = await time(() =>
-      importBackup(back.value.ok ? back.value.backup : file, now)
+      importBackup(back.value.ok ? back.value.backup : file)
     )
     const writes =
       noop.value.decksAdded +
@@ -275,10 +285,28 @@ export async function runBrowserSim(options: BrowserSimOptions) {
   }
   progress("replaying reviews")
   let done = 0
-  for (const entry of sim.logs) {
+  if (options.bulk) {
+    const topicOf = new Map<string, string>()
+    for (const row of rowOf.values()) topicOf.set(row.cardId, row.topicId)
+    const finalRows = sim.rows.map((r) => ({
+      ...r,
+      topicId: topicOf.get(r.cardId) ?? r.topicId,
+    }))
+    for (let i = 0; i < finalRows.length; i += 5000) {
+      await db.cards.bulkPut(finalRows.slice(i, i + 5000))
+    }
+    for (let i = 0; i < sim.logs.length; i += 10_000) {
+      await db.revlog.bulkPut(sim.logs.slice(i, i + 10_000))
+      done = Math.min(sim.logs.length, i + 10_000)
+      progress(`bulk wrote ${done} / ${sim.logs.length}`)
+    }
+  }
+  for (const entry of options.bulk ? [] : sim.logs) {
     const day = Math.floor((entry.reviewedAt - startMs) / DAY)
     while (day >= nextCheckpointDay) {
-      checkpoints.push(await measure(nextCheckpointDay))
+      const made = await measure(nextCheckpointDay)
+      checkpoints.push(made)
+      options.onCheckpoint?.(made)
       nextCheckpointDay += every
     }
     const row = rowOf.get(entry.cardId)
@@ -299,7 +327,9 @@ export async function runBrowserSim(options: BrowserSimOptions) {
     done += 1
     if (done % 1000 === 0) progress(`replayed ${done} / ${sim.logs.length}`)
   }
-  checkpoints.push(await measure(days))
+  const last = await measure(days)
+  checkpoints.push(last)
+  options.onCheckpoint?.(last)
 
   progress("verifying")
   // 1. Stored progress equals what the simulation computed.
@@ -372,7 +402,7 @@ export async function runBrowserSim(options: BrowserSimOptions) {
   await Promise.all(db.tables.map((table) => table.clear()))
   const reparsed = parseBackup(fileText)
   if (!reparsed.ok) throw new Error(reparsed.error)
-  const restore = await time(() => importBackup(reparsed.backup, Date.now()))
+  const restore = await time(() => importBackup(reparsed.backup))
   const after = JSON.stringify(
     (await db.cards.toArray())
       .map((c) => ({

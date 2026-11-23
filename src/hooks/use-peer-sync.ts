@@ -1,20 +1,21 @@
 import * as React from "react"
 
+import { countRows, readBackupParts } from "@/db/backup-parts"
 import { importBackup } from "@/db/repo"
-import { readBackupSnapshot } from "@/db/queries"
 import {
-  exportBackup,
+  addMergeStats,
+  emptyMergeStats,
   parseBackup,
   serializeBackup,
   type MergeStats,
 } from "@/lib/backup"
 import {
-  OK_MESSAGE,
-  Reassembler,
-  failMessage,
-  helloMessage,
-  parseMessage,
-  splitChunks,
+  SyncSession,
+  parseMarks,
+  withMark,
+  type SyncDeps,
+  type SyncMode,
+  type SyncProgress,
 } from "@/lib/sync"
 import {
   openAnswer,
@@ -33,8 +34,8 @@ export type SyncPhase =
   /** The joining device shows its reply and waits for the other to paste it. */
   | { name: "answer"; code: string }
   | { name: "connecting" }
-  | { name: "syncing" }
-  | { name: "done"; stats: MergeStats }
+  | { name: "syncing"; progress: SyncProgress | null }
+  | { name: "done"; stats: MergeStats; modes: SyncMode[]; rounds: number }
   | { name: "error"; message: string }
 
 /** How long the starting device waits after the reply before giving up. */
@@ -46,25 +47,72 @@ const CLOSE_DELAY_MS = 500
 interface Attempt {
   link: Link | null
   offer: Offer | null
-  receiving: Reassembler | null
-  /** Result of merging the other device's data into this one. */
-  stats: MergeStats | null
-  /** The other device has merged ours. */
-  peerOk: boolean
+  session: SyncSession<MergeStats> | null
   /** Done or failed: later events are ignored. */
   over: boolean
   timer: ReturnType<typeof setTimeout> | null
 }
 
 function newAttempt(): Attempt {
+  return { link: null, offer: null, session: null, over: false, timer: null }
+}
+
+const DEVICE_KEY = "glyph.deviceId"
+const MARKS_KEY = "glyph.syncMarks"
+
+/** A random id for this device, kept in localStorage (in memory if that fails). */
+let memoryDeviceId: string | null = null
+function deviceId(): string {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY)
+    if (!id) {
+      id = crypto.randomUUID()
+      localStorage.setItem(DEVICE_KEY, id)
+    }
+    return id
+  } catch {
+    memoryDeviceId ??= crypto.randomUUID()
+    return memoryDeviceId
+  }
+}
+
+function readMarks() {
+  try {
+    return parseMarks(localStorage.getItem(MARKS_KEY))
+  } catch {
+    return {}
+  }
+}
+
+/** What the session needs from this device: its data, its marks, its merge. */
+function depsFor(): SyncDeps<MergeStats> {
   return {
-    link: null,
-    offer: null,
-    receiving: null,
-    stats: null,
-    peerOk: false,
-    over: false,
-    timer: null,
+    deviceId: deviceId(),
+    now: () => Date.now(),
+    markFor: (peer) => readMarks()[peer] ?? null,
+    setMark: (peer, at) => {
+      try {
+        localStorage.setItem(
+          MARKS_KEY,
+          JSON.stringify(withMark(readMarks(), peer, at))
+        )
+      } catch {
+        // No storage: the next sync is simply a full one.
+      }
+    },
+    parts: async function* (since) {
+      for await (const part of readBackupParts(since)) {
+        yield serializeBackup(part)
+      }
+    },
+    merge: async (text) => {
+      const parsed = parseBackup(text)
+      if (!parsed.ok) throw new Error(parsed.error)
+      return importBackup(parsed.backup)
+    },
+    emptyStats: emptyMergeStats,
+    addStats: addMergeStats,
+    counts: countRows,
   }
 }
 
@@ -74,9 +122,11 @@ function message(error: unknown, fallback: string): string {
 
 /**
  * One sync between two devices on the same network, over WebRTC (see
- * `lib/sync/rtc.ts`). Both devices send their whole backup and merge the
- * other's with `importBackup`, so the merge rules are exactly those of a
- * backup file and running a sync twice is harmless.
+ * `lib/sync/rtc.ts`). The conversation itself (what to send, in how many parts,
+ * the check that both ended with the same rows) is `SyncSession`; this hook
+ * only connects it to the data channel and the database. The first sync of two
+ * devices sends everything; later ones only what changed since (see
+ * `lib/sync/delta.ts`). The merge rules are those of a backup file.
  *
  * Roles: the device that calls `start` shows a code, the one that calls `join`
  * with that code shows a reply, and `accept` on the first takes the reply.
@@ -91,6 +141,7 @@ export function usePeerSync() {
     attempt.current = null
     if (!a) return
     a.over = true
+    a.session?.stop()
     if (a.timer) clearTimeout(a.timer)
     a.link?.close()
   }, [])
@@ -99,58 +150,13 @@ export function usePeerSync() {
   React.useEffect(() => teardown, [teardown])
 
   const handlersFor = React.useCallback((a: Attempt): LinkHandlers => {
-    const fail = (text: string, tellPeer: boolean) => {
+    const end = (next: SyncPhase) => {
       if (a.over) return
       a.over = true
       if (a.timer) clearTimeout(a.timer)
-      if (tellPeer) {
-        try {
-          a.link?.send(failMessage(text))
-        } catch {
-          // Already disconnected: nobody to tell.
-        }
-      }
       const link = a.link
       if (link) setTimeout(() => link.close(), CLOSE_DELAY_MS)
-      setPhase({ name: "error", message: text })
-    }
-
-    const finishIfBoth = () => {
-      if (a.over || !a.stats || !a.peerOk) return
-      a.over = true
-      const link = a.link
-      if (link) setTimeout(() => link.close(), CLOSE_DELAY_MS)
-      setPhase({ name: "done", stats: a.stats })
-    }
-
-    const merge = async (bytes: Uint8Array) => {
-      const parsed = parseBackup(new TextDecoder().decode(bytes))
-      if (!parsed.ok) return fail(parsed.error, true)
-      try {
-        a.stats = await importBackup(parsed.backup)
-      } catch (error) {
-        return fail(
-          message(error, "Could not save the other device's data."),
-          true
-        )
-      }
-      if (a.over) return
-      try {
-        a.link?.send(OK_MESSAGE)
-      } catch (error) {
-        return fail(message(error, "The connection closed."), false)
-      }
-      finishIfBoth()
-    }
-
-    const sendOurs = async (link: Link) => {
-      const now = Date.now()
-      const { data, images, settings } = await readBackupSnapshot()
-      const bytes = new TextEncoder().encode(
-        serializeBackup(exportBackup(data, now, images, settings))
-      )
-      link.send(helloMessage(bytes.length))
-      await link.sendChunks(splitChunks(bytes))
+      setPhase(next)
     }
 
     return {
@@ -158,49 +164,52 @@ export function usePeerSync() {
         if (a.over) return
         a.link = link
         if (a.timer) clearTimeout(a.timer)
-        setPhase({ name: "syncing" })
-        sendOurs(link).catch((error: unknown) =>
-          fail(message(error, "Could not send this device's data."), false)
+        setPhase({ name: "syncing", progress: null })
+        const session = new SyncSession<MergeStats>(
+          {
+            sendText: (text) => link.send(text),
+            sendChunks: (chunks) => link.sendChunks(chunks),
+          },
+          depsFor(),
+          {
+            onProgress: (progress) => {
+              if (!a.over) setPhase({ name: "syncing", progress })
+            },
+            onDone: (stats, info) =>
+              end({
+                name: "done",
+                stats,
+                modes: info.modes,
+                rounds: info.rounds,
+              }),
+            onFail: (text) => end({ name: "error", message: text }),
+          }
         )
-      },
-      onText(text) {
-        const m = parseMessage(text)
-        if (a.over || !m) return
-        if (m.t === "hello") {
-          if (a.receiving) return fail("The other device started twice.", true)
-          const begun = Reassembler.begin(m.bytes)
-          if ("error" in begun) return fail(begun.error, true)
-          a.receiving = begun
-          // An empty backup has no chunks to wait for.
-          if (begun.complete) void merge(new Uint8Array())
-        } else if (m.t === "ok") {
-          a.peerOk = true
-          finishIfBoth()
-        } else {
-          fail(
-            m.reason
-              ? `The other device stopped the sync: ${m.reason}`
-              : "The other device stopped the sync.",
-            false
-          )
+        a.session = session
+        try {
+          session.start()
+        } catch (error) {
+          end({
+            name: "error",
+            message: message(error, "Could not start the sync."),
+          })
         }
       },
+      onText(text) {
+        a.session?.onText(text)
+      },
       onBinary(data) {
-        if (a.over) return
-        if (!a.receiving)
-          return fail("Unexpected data from the other device.", true)
-        const pushed = a.receiving.push(data)
-        if (pushed.status === "error") return fail(pushed.error, true)
-        if (pushed.status === "done") void merge(pushed.bytes)
+        a.session?.onBinary(data)
       },
       onClose(reason) {
         if (a.over) return
-        fail(
-          reason === "failed"
-            ? "Could not connect. The devices must be on the same wifi, and a guest network or a router setting that isolates devices can block this."
-            : "The other device disconnected before the sync finished.",
-          false
-        )
+        end({
+          name: "error",
+          message:
+            reason === "failed"
+              ? "Could not connect. The devices must be on the same wifi, and a guest network or a router setting that isolates devices can block this."
+              : "The other device disconnected before the sync finished.",
+        })
       },
     }
   }, [])

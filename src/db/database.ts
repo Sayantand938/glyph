@@ -80,6 +80,15 @@ export class GlyphDB extends Dexie {
     // Settings that sync with the data (retention, fitted weights, leech rule):
     // one row per key, so a backup can carry them. Only adds a table.
     this.version(6).stores({ settings: "key" })
+    // Device sync sends only rows changed since the last sync, found through
+    // these indexes (a note's `contentUpdatedAt`, a card's `updatedAt` and
+    // `markedAt`); a review is found through `reviewedAt` (version 1). Existing
+    // rows are indexed by the upgrade itself, nothing is rewritten.
+    this.version(7).stores({
+      notes: "id, topicId, deletedAt, contentUpdatedAt, *tags",
+      cards:
+        "cardId, noteId, topicId, state, due, updatedAt, markedAt, [topicId+state], [topicId+due]",
+    })
   }
 }
 

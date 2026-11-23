@@ -1,5 +1,29 @@
 import type { MergeStats } from "./types"
 
+export function emptyMergeStats(): MergeStats {
+  return {
+    decksAdded: 0,
+    decksUpdated: 0,
+    notesAdded: 0,
+    notesUpdated: 0,
+    cardsUpdated: 0,
+    cardsDropped: 0,
+    reviewsAdded: 0,
+    notesMissingTopic: 0,
+    imagesAdded: 0,
+    settingsUpdated: 0,
+  }
+}
+
+/** Adds two sets of stats, for a backup merged in several parts. */
+export function addMergeStats(a: MergeStats, b: MergeStats): MergeStats {
+  const sum = { ...a }
+  for (const key of Object.keys(b) as (keyof MergeStats)[]) {
+    sum[key] = a[key] + b[key]
+  }
+  return sum
+}
+
 function plural(n: number, singular: string, many = `${singular}s`): string {
   return `${n} ${n === 1 ? singular : many}`
 }

@@ -32,8 +32,10 @@ export default function App() {
     scope: StudyScope | null
   } | null>(null)
   const backup = useBackupControls(setNotice)
-  // Refit the FSRS weights between study sessions as reviews pile up.
-  useAutoFit(studying !== null)
+  // Refit the FSRS weights between study sessions as reviews pile up. Not while
+  // studying, and not during a sync (which writes thousands of reviews and would
+  // restart the fit after every part).
+  useAutoFit(studying !== null || syncOpen)
 
   return (
     <div

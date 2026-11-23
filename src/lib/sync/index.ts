@@ -10,12 +10,36 @@ export {
 } from "./pairing"
 export {
   CHUNK_BYTES,
-  OK_MESSAGE,
   Reassembler,
+  SYNC_VERSION,
+  endMessage,
   failMessage,
-  helloMessage,
+  hiMessage,
+  okMessage,
   parseMessage,
+  partMessage,
+  planMessage,
   splitChunks,
   type PushResult,
   type SyncMessage,
+  type SyncMode,
 } from "./protocol"
+export {
+  PART_ROWS,
+  SYNC_OVERLAP_MS,
+  countsEqual,
+  deltaSince,
+  pagesOf,
+  parseCounts,
+  parseMarks,
+  withMark,
+  type RowCounts,
+  type SyncMarks,
+} from "./delta"
+export {
+  SyncSession,
+  type SyncDeps,
+  type SyncEvents,
+  type SyncIO,
+  type SyncProgress,
+} from "./session"

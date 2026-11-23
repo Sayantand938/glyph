@@ -6,7 +6,7 @@ export { backupFilename, exportBackup, serializeBackup } from "./export"
 export { missingImages } from "./images"
 export { mergeBackup } from "./merge"
 export { parseBackup } from "./parse"
-export { formatMergeSummary } from "./summary"
+export { addMergeStats, emptyMergeStats, formatMergeSummary } from "./summary"
 export {
   BACKUP_APP,
   BACKUP_SCHEMA_VERSION,

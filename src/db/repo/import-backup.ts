@@ -14,25 +14,45 @@ import type { BackupFile } from "../types"
  */
 export async function importBackup(
   incoming: Pick<BackupFile, "decks" | "notes" | "cards" | "revlog"> &
-    Partial<Pick<BackupFile, "images" | "settings">>,
-  now = Date.now()
+    Partial<Pick<BackupFile, "images" | "settings">>
 ): Promise<MergeStats> {
   return db.transaction(
     "rw",
     [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
     async () => {
+      // Only the local rows the incoming ones can meet (by id), not the whole
+      // database: a merge of a few changed rows must not read every review.
+      // Decks are few and are read whole. A card is read for every incoming
+      // note too, so a moved note can bring its card's topic along.
+      const noteIds = new Set([
+        ...incoming.notes.map((n) => n.id),
+        ...incoming.cards.map((c) => c.noteId),
+      ])
+      const cardIds = new Set([
+        ...incoming.cards.map((c) => c.cardId),
+        ...incoming.notes.map((n) => n.id),
+      ])
+      const present = <T>(rows: (T | undefined)[]): T[] =>
+        rows.filter((row): row is T => row !== undefined)
       const local = {
         decks: await db.decks.toArray(),
-        notes: await db.notes.toArray(),
-        cards: await db.cards.toArray(),
-        revlog: await db.revlog.toArray(),
+        notes: present(await db.notes.bulkGet([...noteIds])),
+        cards: present(await db.cards.bulkGet([...cardIds])),
+        revlog: present(
+          await db.revlog.bulkGet(incoming.revlog.map((r) => r.id))
+        ),
       }
       const { merged, write, stats } = mergeBackup(local, incoming)
 
       const haveCard = new Set(merged.cards.map((c) => c.cardId))
+      // A stand-in card for a note that has none (its card may arrive in a later
+      // part of the same sync). It is stamped with time 0, so a real card, which
+      // always has a later `updatedAt`, replaces it; stamped with `now` it would
+      // win against the real card of a never-reviewed question and the two
+      // devices would end with different creation times (which order new cards).
       const repaired = merged.notes
         .filter((n) => n.deletedAt === null && !haveCard.has(n.id))
-        .map((n) => emptyCardRow(n, now))
+        .map((n) => emptyCardRow(n, 0))
 
       const newImages = missingImages(
         await db.images.toCollection().primaryKeys(),

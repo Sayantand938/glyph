@@ -1,28 +1,64 @@
+import { parseCounts, type RowCounts } from "./delta"
+
 /**
- * The wire format of a sync, over one ordered WebRTC data channel. Each side
- * sends its whole backup as bytes: a `hello` text message with the byte count,
- * then binary chunks. The receiver merges it and answers `ok` (or `fail`).
- * Both directions run at once; the sync is finished when a device has merged
- * the other's backup and received the other's `ok`.
+ * The wire format of a sync, over one ordered WebRTC data channel. Both devices
+ * talk at once.
+ *
+ *   hi    each device says who it is (a random id kept on the device)
+ *   plan  a round starts: `delta` (only rows changed since the last sync) or
+ *         `full` (everything); `round` 1 is the first, 2 the repeat after a
+ *         mismatch
+ *   part  `bytes` of JSON follow as binary chunks: one part of a backup (see
+ *         `readBackupParts`); a round is any number of parts, each merged as it
+ *         arrives, so no message or buffer is ever as big as the whole data
+ *   end   the round has no more parts; `parts` is how many were sent
+ *   ok    every part of the other device's round is merged; `counts` are this
+ *         device's row counts then, which must equal the other's
+ *   fail  something went wrong
  */
+
+/** Version 2 sends parts; version 1 sent one whole backup and is not understood. */
+export const SYNC_VERSION = 2
 
 /** Small enough for every browser's data channel (the interoperable limit is 16 KiB). */
 export const CHUNK_BYTES = 16 * 1024
 
+export type SyncMode = "delta" | "full"
+
 export type SyncMessage =
-  | { t: "hello"; v: 1; bytes: number }
-  | { t: "ok" }
+  | { t: "hi"; v: number; device: string }
+  | { t: "plan"; mode: SyncMode; round: number }
+  | { t: "part"; bytes: number }
+  | { t: "end"; parts: number }
+  | { t: "ok"; counts: RowCounts }
   | { t: "fail"; reason: string }
 
-export function helloMessage(bytes: number): string {
-  return JSON.stringify({ t: "hello", v: 1, bytes })
+export function hiMessage(device: string): string {
+  return JSON.stringify({ t: "hi", v: SYNC_VERSION, device })
 }
 
-export const OK_MESSAGE = JSON.stringify({ t: "ok" })
+export function planMessage(mode: SyncMode, round: number): string {
+  return JSON.stringify({ t: "plan", mode, round })
+}
+
+export function partMessage(bytes: number): string {
+  return JSON.stringify({ t: "part", bytes })
+}
+
+export function endMessage(parts: number): string {
+  return JSON.stringify({ t: "end", parts })
+}
+
+export function okMessage(counts: RowCounts): string {
+  return JSON.stringify({ t: "ok", counts })
+}
 
 export function failMessage(reason: string): string {
   return JSON.stringify({ t: "fail", reason })
 }
+
+const isCount = (n: unknown): n is number =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0
 
 /** Reads a control message from the other device; null if it is not one we know. */
 export function parseMessage(text: string): SyncMessage | null {
@@ -34,23 +70,36 @@ export function parseMessage(text: string): SyncMessage | null {
   }
   if (typeof data !== "object" || data === null) return null
   const m = data as Record<string, unknown>
-  if (m.t === "ok") return { t: "ok" }
-  if (m.t === "fail") {
-    return {
-      t: "fail",
-      reason: typeof m.reason === "string" ? m.reason.slice(0, 200) : "",
+  switch (m.t) {
+    case "hi":
+      return typeof m.v === "number" &&
+        typeof m.device === "string" &&
+        m.device.length >= 1 &&
+        m.device.length <= 80
+        ? { t: "hi", v: m.v, device: m.device }
+        : null
+    case "plan":
+      return (m.mode === "delta" || m.mode === "full") &&
+        isCount(m.round) &&
+        m.round >= 1
+        ? { t: "plan", mode: m.mode, round: m.round }
+        : null
+    case "part":
+      return isCount(m.bytes) ? { t: "part", bytes: m.bytes } : null
+    case "end":
+      return isCount(m.parts) ? { t: "end", parts: m.parts } : null
+    case "ok": {
+      const counts = parseCounts(m.counts)
+      return counts ? { t: "ok", counts } : null
     }
+    case "fail":
+      return {
+        t: "fail",
+        reason: typeof m.reason === "string" ? m.reason.slice(0, 200) : "",
+      }
+    default:
+      return null
   }
-  if (
-    m.t === "hello" &&
-    m.v === 1 &&
-    typeof m.bytes === "number" &&
-    Number.isInteger(m.bytes) &&
-    m.bytes >= 0
-  ) {
-    return { t: "hello", v: 1, bytes: m.bytes }
-  }
-  return null
 }
 
 /** Cuts bytes into chunks that are views of the same buffer (no copy). */

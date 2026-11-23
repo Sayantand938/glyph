@@ -138,7 +138,8 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
           <p className="text-sm text-muted-foreground">
             Pick one device to start, and join from the other. After a sync both
             devices have the same questions and progress; where both changed the
-            same thing, the newer change wins, like restoring a backup.
+            same thing, the newer change wins, like restoring a backup. The
+            first sync sends everything; after that only what changed.
           </p>
           <div className="grid gap-2 sm:max-w-sm">
             <Button type="button" onClick={() => void sync.start()}>
@@ -191,7 +192,20 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
       {phase.name === "connecting" && <Waiting>Connecting...</Waiting>}
 
       {phase.name === "syncing" && (
-        <Waiting>Syncing. Keep both devices open.</Waiting>
+        <div className="space-y-2">
+          <Waiting>Syncing. Keep both devices open.</Waiting>
+          {phase.progress && (
+            <p className="text-xs text-muted-foreground">
+              {phase.progress.round === 2
+                ? "The devices differed after the quick sync, so everything is being sent once to be sure. "
+                : phase.progress.mode === "full"
+                  ? "Sending everything (the first sync of these two devices). "
+                  : "Sending only what changed. "}
+              Sent {phase.progress.sentParts} parts, received{" "}
+              {phase.progress.receivedParts}.
+            </p>
+          )}
+        </div>
       )}
 
       {phase.name === "done" && (
@@ -205,6 +219,13 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
             <p className="text-muted-foreground">
               This device: {formatMergeSummary(phase.stats)} The other device
               did the same with this device&apos;s data.
+            </p>
+            <p className="text-muted-foreground">
+              {phase.rounds === 2
+                ? "The devices differed after the quick sync, so everything was sent once to be sure."
+                : phase.modes[0] === "delta"
+                  ? "Only what changed since your last sync was sent."
+                  : "This was the first sync of these two devices, so everything was sent. Next time only what changed is sent."}
             </p>
           </div>
         </div>
