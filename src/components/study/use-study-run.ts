@@ -1,13 +1,10 @@
 import * as React from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import {
-  loadStudyCard,
-  loadStudyCards,
-  type StudyCardView,
-} from "@/db/queries"
+import { loadStudyCard, loadStudyCards, type StudyCardView } from "@/db/queries"
 import { applyReview, undoReview } from "@/db/repo"
 import { Rating, previewIntervals, type Grade } from "@/db/scheduler"
+import { useRetention } from "@/hooks/use-retention"
 import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
 import { buildQueue } from "@/lib/queue"
@@ -37,6 +34,7 @@ export function useStudyRun(scope: StudyScope) {
     true,
     parseBool
   )
+  const [retention] = useRetention()
   const busy = React.useRef(false)
   const shownAt = React.useRef(0)
 
@@ -95,9 +93,9 @@ export function useStudyRun(scope: StudyScope) {
   const intervals = React.useMemo(
     () =>
       data && rightPickedAt !== null
-        ? previewIntervals(data.card, rightPickedAt)
+        ? previewIntervals(data.card, rightPickedAt, retention)
         : null,
-    [data, rightPickedAt]
+    [data, rightPickedAt, retention]
   )
 
   const finished = run !== null && run.queue.length > 0 && cardId === null
@@ -131,7 +129,12 @@ export function useStudyRun(scope: StudyScope) {
     busy.current = true
     try {
       const durationMs = currentTime() - shownAt.current
-      const { log } = await applyReview(view.card, Rating.Again, durationMs)
+      const { log } = await applyReview(
+        view.card,
+        Rating.Again,
+        durationMs,
+        retention
+      )
       const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {
         cardId: view.card.cardId,
@@ -167,7 +170,12 @@ export function useStudyRun(scope: StudyScope) {
     setMessage(null)
     try {
       const durationMs = currentTime() - shownAt.current
-      const { log } = await applyReview(view.card, rating, durationMs)
+      const { log } = await applyReview(
+        view.card,
+        rating,
+        durationMs,
+        retention
+      )
       const failed = rating === Rating.Again
       const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {

@@ -11,6 +11,13 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  clampRetention,
+  DEFAULT_RETENTION,
+  MAX_RETENTION,
+  MIN_RETENTION,
+} from "@/db/scheduler"
+import { useRetention } from "@/hooks/use-retention"
 import { useTheme, type Theme } from "@/hooks/use-theme"
 import { version } from "../../package.json"
 
@@ -61,6 +68,7 @@ export function SettingsPage({
   onImportBackup: () => void
 }) {
   const { theme, setTheme } = useTheme()
+  const [retention, setRetention] = useRetention()
 
   return (
     <div className="flex flex-col py-4">
@@ -97,6 +105,40 @@ export function SettingsPage({
               {label}
             </Button>
           ))}
+        </div>
+      </Section>
+
+      <Section
+        title="Scheduling"
+        description="How likely you want to be to remember a card when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on."
+      >
+        <div className="space-y-2 sm:max-w-sm">
+          <div className="flex items-center justify-between text-sm">
+            <label htmlFor="retention" className="text-muted-foreground">
+              Desired retention
+            </label>
+            <span className="font-mono">{Math.round(retention * 100)}%</span>
+          </div>
+          <input
+            id="retention"
+            type="range"
+            className="w-full accent-primary"
+            min={Math.round(MIN_RETENTION * 100)}
+            max={Math.round(MAX_RETENTION * 100)}
+            step={1}
+            value={Math.round(retention * 100)}
+            onChange={(e) =>
+              setRetention(clampRetention(+e.target.value / 100))
+            }
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={retention === DEFAULT_RETENTION}
+            onClick={() => setRetention(DEFAULT_RETENTION)}
+          >
+            Reset to {Math.round(DEFAULT_RETENTION * 100)}%
+          </Button>
         </div>
       </Section>
 

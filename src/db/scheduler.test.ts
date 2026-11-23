@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   cardToRow,
+  clampRetention,
+  DEFAULT_RETENTION,
   emptyCardRow,
   formatInterval,
   grade,
+  parseRetention,
   previewIntervals,
   Rating,
   rowToCard,
@@ -116,6 +119,35 @@ describe("previewIntervals", () => {
     for (let i = 0; i < 3; i++) row = grade(row, Rating.Good, row.due).row
     const p = previewIntervals(row, row.due)
     expect(p.good).toMatch(/d|mo|y/)
+  })
+})
+
+describe("retention", () => {
+  it("defaults to 85%", () => {
+    expect(DEFAULT_RETENTION).toBe(0.85)
+  })
+
+  it("clamps and rounds to whole percents, and falls back on junk", () => {
+    expect(clampRetention(0.5)).toBe(0.7)
+    expect(clampRetention(0.999)).toBe(0.97)
+    expect(clampRetention(0.8549)).toBe(0.85)
+    expect(clampRetention(Number.NaN)).toBe(DEFAULT_RETENTION)
+  })
+
+  it("parses stored values", () => {
+    expect(parseRetention(0.9)).toBe(0.9)
+    expect(parseRetention(0.1)).toBe(0.7)
+    expect(parseRetention("0.9")).toBeNull()
+    expect(parseRetention(null)).toBeNull()
+  })
+
+  it("schedules review cards further out at lower retention", () => {
+    let row = emptyCardRow(note, NOW)
+    for (let i = 0; i < 4; i++) row = grade(row, Rating.Good, row.due).row
+    const due = (retention: number) =>
+      grade(row, Rating.Good, row.due, 0, retention).row.scheduledDays
+    expect(due(0.75)).toBeGreaterThan(due(0.85))
+    expect(due(0.85)).toBeGreaterThan(due(0.95))
   })
 })
 

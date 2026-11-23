@@ -14,6 +14,7 @@ import {
   Rating,
   State,
   type Card,
+  type FSRS,
 } from "ts-fsrs"
 
 import type { CardRow, Note, RevlogRow } from "./types"
@@ -23,7 +24,38 @@ export { Rating, State }
 /** The only ratings Glyph produces: fail or pass. */
 export type Grade = Rating.Again | Rating.Good
 
-const scheduler = fsrs(generatorParameters({ enable_fuzz: true }))
+/** Target probability of recalling a card on the day it is due. */
+export const DEFAULT_RETENTION = 0.85
+export const MIN_RETENTION = 0.7
+export const MAX_RETENTION = 0.97
+
+/** Clamps to the supported range and rounds to a whole percent. */
+export function clampRetention(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_RETENTION
+  const percent = Math.round(value * 100)
+  return Math.min(MAX_RETENTION, Math.max(MIN_RETENTION, percent / 100))
+}
+
+/** Reads a stored retention, or null if it isn't a usable number. */
+export function parseRetention(stored: unknown): number | null {
+  return typeof stored === "number" && Number.isFinite(stored)
+    ? clampRetention(stored)
+    : null
+}
+
+const schedulers = new Map<number, FSRS>()
+
+function schedulerFor(retention: number): FSRS {
+  const key = clampRetention(retention)
+  let instance = schedulers.get(key)
+  if (!instance) {
+    instance = fsrs(
+      generatorParameters({ enable_fuzz: true, request_retention: key })
+    )
+    schedulers.set(key, instance)
+  }
+  return instance
+}
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -115,8 +147,12 @@ export interface IntervalPreview {
   good: string
 }
 
-export function previewIntervals(row: CardRow, now: number): IntervalPreview {
-  const preview = scheduler.repeat(rowToCard(row), new Date(now))
+export function previewIntervals(
+  row: CardRow,
+  now: number,
+  retention = DEFAULT_RETENTION
+): IntervalPreview {
+  const preview = schedulerFor(retention).repeat(rowToCard(row), new Date(now))
   const label = (grade: Grade) =>
     formatInterval(preview[grade].card.due.getTime() - now)
   return {
@@ -129,9 +165,14 @@ export function grade(
   row: CardRow,
   rating: Grade,
   now: number,
-  durationMs = 0
+  durationMs = 0,
+  retention = DEFAULT_RETENTION
 ): { row: CardRow; log: RevlogRow } {
-  const { card } = scheduler.next(rowToCard(row), new Date(now), rating)
+  const { card } = schedulerFor(retention).next(
+    rowToCard(row),
+    new Date(now),
+    rating
+  )
   return {
     row: cardToRow(card, row),
     log: {

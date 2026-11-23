@@ -37,6 +37,10 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 The header's Import JSON / Export Backup / Import Backup buttons and menu (`header-menu.tsx`, deleted) were replaced by a gear button that switches `App.tsx` to a full-page `src/components/settings-page.tsx` (a `settingsOpen` view state like `studying`; no router, so the browser back button leaves the app and the page has its own Back arrow). Sections: Appearance (Light / Dark / System via `useTheme`), Data (the three import/export actions; results show in App's notice banner), Statistics (placeholder, "coming soon") and About (app version, imported from `package.json`). `ui/dropdown-menu.tsx` is still used by `deck-tree.tsx`. Verified in the browser: gear opens the page, Export Backup shows its notice, Back returns to the dashboard. Not exercised: Import Backup / Import JSON from the page, theme switching on the page after the move from the dialog, and the mobile layout.
 
+### Configurable retention (after Phase 7)
+
+Settings > Scheduling has a Desired retention slider (70-97%, default 85%, was ts-fsrs's 90%) and a reset button. The value is a per-device preference in localStorage (`glyph.retention`, via `hooks/use-retention.ts`), like the theme, so it is not part of backups and does not sync. `db/scheduler.ts` keeps one `fsrs` instance per retention value (`schedulerFor`) and `grade`, `previewIntervals` and `applyReview` take a trailing `retention` argument that defaults to `DEFAULT_RETENTION`; `use-study-run.ts` passes the stored value. It affects only future reviews; existing due dates are not recomputed. The `src/sim/` runs use the 85% default.
+
 ### Refactor: smaller files (after Phase 7)
 
 Pure restructuring, no behavior change. The four largest modules became directories; import paths for `@/lib/backup`, `@/lib/importer` and `@/db/repo` are unchanged (barrel `index.ts`). Phase notes below still name the old single files.

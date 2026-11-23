@@ -1,5 +1,5 @@
 import { db } from "../database"
-import { grade, type Grade } from "../scheduler"
+import { DEFAULT_RETENTION, grade, type Grade } from "../scheduler"
 import type { CardRow, RevlogRow } from "../types"
 
 /** Grades the card and writes the new card row and revlog entry atomically. */
@@ -7,9 +7,10 @@ export async function applyReview(
   cardRow: CardRow,
   rating: Grade,
   durationMs: number,
+  retention = DEFAULT_RETENTION,
   now = Date.now()
 ): Promise<{ row: CardRow; log: RevlogRow }> {
-  const result = grade(cardRow, rating, now, durationMs)
+  const result = grade(cardRow, rating, now, durationMs, retention)
   await db.transaction("rw", [db.cards, db.revlog], async () => {
     await db.cards.put(result.row)
     await db.revlog.add(result.log)
