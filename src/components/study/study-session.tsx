@@ -119,7 +119,15 @@ export function StudySession({
     )
   }
   if (confirmExit) {
-    return <ExitPage onStay={() => setConfirmExit(false)} onLeave={onExit} />
+    return (
+      <ExitPage
+        summary={s.summary}
+        records={run.history}
+        scopeName={scope.name}
+        onStay={() => setConfirmExit(false)}
+        onLeave={onExit}
+      />
+    )
   }
   if (help) return <ShortcutsPage onClose={() => setHelp(false)} />
 

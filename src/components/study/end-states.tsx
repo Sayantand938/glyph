@@ -116,16 +116,13 @@ function StatTile({
   )
 }
 
-export function FinishedState({
+/** Accuracy ring, tiles and the answer-by-answer strip of a session so far. */
+export function SessionStats({
   summary,
   records,
-  scopeName,
-  onExit,
 }: {
   summary: SessionSummary
   records: readonly SessionRecord[]
-  scopeName: string
-  onExit: () => void
 }) {
   const { cards, answers, correct, accuracy, totalMs } = summary
   const missed = answers - correct
@@ -133,17 +130,7 @@ export function FinishedState({
   const average = answers === 0 ? 0 : totalMs / answers
 
   return (
-    <div className="flex flex-1 flex-col gap-6 py-2">
-      <div className="flex flex-col items-center gap-1 text-center">
-        <span className="mb-2 flex size-10 items-center justify-center rounded-full bg-foreground text-background">
-          <CheckIcon className="size-5" aria-hidden />
-        </span>
-        <h2 className="text-xl font-semibold tracking-tight">
-          Session complete
-        </h2>
-        <p className="text-sm text-muted-foreground">{scopeName}</p>
-      </div>
-
+    <>
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-6">
         {answers === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -222,6 +209,34 @@ export function FinishedState({
           </div>
         </div>
       )}
+    </>
+  )
+}
+
+export function FinishedState({
+  summary,
+  records,
+  scopeName,
+  onExit,
+}: {
+  summary: SessionSummary
+  records: readonly SessionRecord[]
+  scopeName: string
+  onExit: () => void
+}) {
+  return (
+    <div className="flex flex-1 flex-col gap-6 py-2">
+      <div className="flex flex-col items-center gap-1 text-center">
+        <span className="mb-2 flex size-10 items-center justify-center rounded-full bg-foreground text-background">
+          <CheckIcon className="size-5" aria-hidden />
+        </span>
+        <h2 className="text-xl font-semibold tracking-tight">
+          Session complete
+        </h2>
+        <p className="text-sm text-muted-foreground">{scopeName}</p>
+      </div>
+
+      <SessionStats summary={summary} records={records} />
 
       <Button
         className="mt-auto w-full sm:w-auto sm:self-center sm:px-10"
