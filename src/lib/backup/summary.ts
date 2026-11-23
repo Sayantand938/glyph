@@ -18,6 +18,9 @@ export function formatMergeSummary(stats: MergeStats): string {
   if (stats.reviewsAdded > 0) {
     parts.push(`+${plural(stats.reviewsAdded, "review")}`)
   }
+  if (stats.imagesAdded > 0) {
+    parts.push(`+${plural(stats.imagesAdded, "image")}`)
+  }
 
   let text =
     parts.length > 0 ? `Merged: ${parts.join(", ")}.` : "Nothing new to merge."

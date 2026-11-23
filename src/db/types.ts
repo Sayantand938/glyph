@@ -61,6 +61,28 @@ export interface RevlogRow {
   durationMs: number
 }
 
+/**
+ * A picture used by note text through `![alt](img:<id>)`. The id is a hash of
+ * the bytes (see lib/image/id.ts), so a row never changes once written.
+ */
+export interface ImageRow {
+  id: string
+  /** One of IMAGE_MIMES. */
+  mime: string
+  width: number
+  height: number
+  blob: Blob
+}
+
+/** An image inside a backup file: the bytes as base64. */
+export interface BackupImage {
+  id: string
+  mime: string
+  width: number
+  height: number
+  data: string
+}
+
 export interface BackupFile {
   app: "mcq-srs"
   schemaVersion: number
@@ -69,4 +91,6 @@ export interface BackupFile {
   notes: Note[]
   cards: CardRow[]
   revlog: RevlogRow[]
+  /** Only the images that notes use. Absent in schema version 1 files. */
+  images: BackupImage[]
 }

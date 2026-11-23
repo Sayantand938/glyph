@@ -1,3 +1,4 @@
+import { imageTokenRegex } from "./image/tokens"
 import { splitMath } from "./math"
 
 /**
@@ -7,8 +8,9 @@ import { splitMath } from "./math"
  *
  * Blocks:  fenced code (``` ... ```), # headings, - / * / + bullets,
  *          1. numbered items, > quotes, paragraphs (single newlines kept).
- * Inline:  **bold**, *italic*, _italic_, ~~strike~~, `code`.
- * Not supported on purpose: links, images, tables, nested lists, raw HTML.
+ * Inline:  **bold**, *italic*, _italic_, ~~strike~~, `code`, and
+ *          ![alt](img:<id>) for an image stored in the app (see lib/image).
+ * Not supported on purpose: links, URL images, tables, nested lists, raw HTML.
  *
  * Math is untouched: `$...$` etc. is cut out first with `splitMath` and put
  * back afterwards, so `**the value $x_1$**` works and `*` or `_` inside TeX is
@@ -29,6 +31,7 @@ export type Inline =
   | { kind: "text"; text: string }
   | { kind: "bold" | "italic" | "strike"; children: Inline[] }
   | { kind: "code"; text: string }
+  | { kind: "image"; id: string; alt: string }
   | MathNode
 
 export type Block =
@@ -194,7 +197,7 @@ export function parseInline(text: string): Inline[] {
 
   let withAtoms = ""
   let last = 0
-  const pushPlain = (plain: string) => {
+  const pushMath = (plain: string) => {
     for (const seg of splitMath(plain)) {
       withAtoms +=
         seg.kind === "text"
@@ -206,6 +209,16 @@ export function parseInline(text: string): Inline[] {
               raw: seg.raw,
             })
     }
+  }
+  // Image tokens are cut out of the plain text before math, like code spans.
+  const pushPlain = (plain: string) => {
+    let from = 0
+    for (const m of plain.matchAll(imageTokenRegex())) {
+      pushMath(plain.slice(from, m.index))
+      withAtoms += addAtom({ kind: "image", alt: m[1], id: m[2] })
+      from = m.index + m[0].length
+    }
+    pushMath(plain.slice(from))
   }
 
   for (const m of clean.matchAll(CODE_SPAN)) {

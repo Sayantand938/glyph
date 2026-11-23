@@ -189,6 +189,70 @@ describe("exportBackup / parseBackup", () => {
       /notes\[0\]/
     )
   })
+
+  describe("images", () => {
+    const image = {
+      id: "0123456789abcdef0123456789abcdef",
+      mime: "image/webp",
+      width: 640,
+      height: 480,
+      data: "UklGRg==",
+    }
+
+    it("round-trips images", () => {
+      const file = exportBackup(sample, 1, [image])
+      expect(file.images).toEqual([image])
+      expect(parseBackup(serializeBackup(file))).toEqual({
+        ok: true,
+        backup: file,
+      })
+    })
+
+    it("accepts a version 1 file that has no images list", () => {
+      const text = mutate((f) => {
+        f.schemaVersion = 1
+        delete f.images
+      })
+      const parsed = parseBackup(text)
+      expect(parsed.ok && parsed.backup.images).toEqual([])
+    })
+
+    it("rejects a damaged image row, naming it", () => {
+      const withImage = (over: Record<string, unknown>) =>
+        JSON.stringify({
+          ...JSON.parse(serializeBackup(exportBackup(sample, 1))),
+          images: [{ ...image, ...over }],
+        })
+      rejects(withImage({ id: "nope" }), /images\[0\]/)
+      rejects(withImage({ mime: "image/svg+xml" }), /images\[0\]/)
+      rejects(withImage({ width: 0 }), /images\[0\]/)
+      rejects(withImage({ data: "not base64!" }), /images\[0\]/)
+      rejects(withImage({ data: 5 }), /images\[0\]/)
+      rejects(
+        mutate((f) => (f.images = "x")),
+        /"images"/
+      )
+    })
+
+    it("strips unknown fields from image rows", () => {
+      const text = JSON.stringify({
+        ...JSON.parse(serializeBackup(exportBackup(sample, 1))),
+        images: [{ ...image, evil: "x" }],
+      })
+      const parsed = parseBackup(text)
+      expect(parsed.ok && parsed.backup.images[0]).toEqual(image)
+    })
+
+    it("mentions added images in the merge summary", () => {
+      const zero = mergeBackup(data(), data()).stats
+      expect(formatMergeSummary({ ...zero, imagesAdded: 3 })).toBe(
+        "Merged: +3 images."
+      )
+      expect(formatMergeSummary({ ...zero, imagesAdded: 1 })).toBe(
+        "Merged: +1 image."
+      )
+    })
+  })
 })
 
 describe("backupFilename", () => {

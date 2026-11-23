@@ -2,6 +2,7 @@ import katex from "katex"
 import "katex/dist/katex.min.css"
 import * as React from "react"
 
+import { NoteImage } from "@/components/note-image"
 import { parseMarkdown, type Block, type Inline } from "@/lib/markdown"
 
 function MathSpan({
@@ -79,6 +80,8 @@ function Inlines({ nodes }: { nodes: Inline[] }) {
             return (
               <MathSpan key={i} tex={n.tex} display={n.display} raw={n.raw} />
             )
+          case "image":
+            return <NoteImage key={i} id={n.id} alt={n.alt} />
         }
       })}
     </>
@@ -139,7 +142,8 @@ function BlockView({ block }: { block: Block }) {
 
 /**
  * Note text with a small Markdown subset (bold, italic, strike, inline code,
- * code fences, headings, lists, quotes) and LaTeX via KaTeX. Everything is
+ * code fences, headings, lists, quotes), pasted images (`![](img:<id>)`) and
+ * LaTeX via KaTeX. Everything is
  * built as React elements, never an HTML string (CLAUDE.md rule 10). Text with
  * no block structure renders as a bare fragment, so the caller's element keeps
  * its own whitespace and wrapping classes; several blocks are stacked spans.

@@ -1,9 +1,10 @@
 /** Read-only queries. Writes live in repo.ts. Call these from `useLiveQuery`. */
 import type { BackupData } from "@/lib/backup"
+import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
 import { db } from "./database"
-import type { CardRow, Deck, Note } from "./types"
+import type { BackupImage, CardRow, Deck, ImageRow, Note } from "./types"
 
 export interface DashboardData {
   /** Live Subjects, sorted by name. */
@@ -110,16 +111,61 @@ export async function loadStudyCard(
   })
 }
 
-/** Every row of every table, read in one snapshot, for export and merging. */
-export async function readAllData(): Promise<BackupData> {
-  return db.transaction(
+export interface ImageView {
+  /** A `data:` URL, so there is no object URL to revoke. */
+  src: string
+  width: number
+  height: number
+}
+
+/** A stored image ready for an <img>, or null if there is none with that id. */
+export async function loadImageView(id: string): Promise<ImageView | null> {
+  const row = await db.images.get(id)
+  if (!row) return null
+  const bytes = new Uint8Array(await row.blob.arrayBuffer())
+  return {
+    src: `data:${row.mime};base64,${bytesToBase64(bytes)}`,
+    width: row.width,
+    height: row.height,
+  }
+}
+
+/**
+ * Everything a backup file holds, read in one snapshot: the four tables plus
+ * the images that notes use (tombstoned notes included), as base64.
+ */
+export async function readBackupSnapshot(): Promise<{
+  data: BackupData
+  images: BackupImage[]
+}> {
+  const { data, rows } = await db.transaction(
     "r",
-    [db.decks, db.notes, db.cards, db.revlog],
-    async () => ({
-      decks: await db.decks.toArray(),
-      notes: await db.notes.toArray(),
-      cards: await db.cards.toArray(),
-      revlog: await db.revlog.toArray(),
-    })
+    [db.decks, db.notes, db.cards, db.revlog, db.images],
+    async () => {
+      const data: BackupData = {
+        decks: await db.decks.toArray(),
+        notes: await db.notes.toArray(),
+        cards: await db.cards.toArray(),
+        revlog: await db.revlog.toArray(),
+      }
+      const used = imageIdsInNotes(data.notes)
+      const found = await db.images.bulkGet([...used])
+      return {
+        data,
+        rows: found.filter((row): row is ImageRow => row !== undefined),
+      }
+    }
   )
+  // Blob -> bytes is not an IndexedDB call, so it stays outside the transaction.
+  const images: BackupImage[] = []
+  for (const row of rows) {
+    images.push({
+      id: row.id,
+      mime: row.mime,
+      width: row.width,
+      height: row.height,
+      data: bytesToBase64(new Uint8Array(await row.blob.arrayBuffer())),
+    })
+  }
+  return { data, images }
 }

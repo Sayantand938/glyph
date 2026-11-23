@@ -1,13 +1,16 @@
-import type { BackupFile } from "@/db/types"
+import type { BackupFile, BackupImage } from "@/db/types"
 
-import {
-  BACKUP_APP,
-  BACKUP_SCHEMA_VERSION,
-  type BackupData,
-} from "./types"
+import { BACKUP_APP, BACKUP_SCHEMA_VERSION, type BackupData } from "./types"
 
-/** Builds the backup envelope. Tombstones are included so deletions propagate. */
-export function exportBackup(data: BackupData, now: number): BackupFile {
+/**
+ * Builds the backup envelope. Tombstones are included so deletions propagate.
+ * `images` should hold only the images that notes use.
+ */
+export function exportBackup(
+  data: BackupData,
+  now: number,
+  images: BackupImage[] = []
+): BackupFile {
   return {
     app: BACKUP_APP,
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -16,6 +19,7 @@ export function exportBackup(data: BackupData, now: number): BackupFile {
     notes: data.notes,
     cards: data.cards,
     revlog: data.revlog,
+    images,
   }
 }
 
