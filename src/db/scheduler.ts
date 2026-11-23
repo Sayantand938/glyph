@@ -17,6 +17,8 @@ import {
   type FSRS,
 } from "ts-fsrs"
 
+import { marksOf, type CardMarks } from "@/lib/card-marks"
+
 import type { CardRow, Note, RevlogRow } from "./types"
 
 export { Rating, State }
@@ -115,9 +117,13 @@ export function rowToCard(row: CardRow): Card {
   }
 }
 
+/**
+ * `base` supplies the identity and, when it is an existing row, its card marks
+ * (flag, suspend, bury), which grading carries over unchanged.
+ */
 export function cardToRow(
   card: Card,
-  base: Pick<CardRow, "cardId" | "noteId" | "topicId">
+  base: Pick<CardRow, "cardId" | "noteId" | "topicId"> & Partial<CardMarks>
 ): CardRow {
   const due = card.due.getTime()
   const lastReview = card.last_review ? card.last_review.getTime() : 0
@@ -137,6 +143,7 @@ export function cardToRow(
     lastReview,
     // Untouched cards are created with due === creation time.
     updatedAt: lastReview > 0 ? lastReview : due,
+    ...marksOf(base),
   }
 }
 

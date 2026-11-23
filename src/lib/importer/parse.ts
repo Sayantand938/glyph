@@ -1,11 +1,7 @@
 import { normalizeAnswer } from "@/lib/answer"
+import { parseTags, tagsError } from "@/lib/tags"
 
-import type {
-  InvalidRow,
-  ParseResult,
-  ValidRow,
-  Validation,
-} from "./types"
+import type { InvalidRow, ParseResult, ValidRow, Validation } from "./types"
 
 /** Parses the raw file text. Never throws; the root must be a JSON array. */
 export function parseImportText(text: string): ParseResult {
@@ -78,6 +74,19 @@ export function validateRows(rows: readonly unknown[]): Validation {
       )
     }
 
+    // Optional. A list of text or one string ("a, b c"); absent means "leave
+    // the note's tags as they are", an empty list means "no tags".
+    let tags: string[] | undefined
+    if (raw.tags !== undefined && raw.tags !== null) {
+      if (typeof raw.tags === "string" || Array.isArray(raw.tags)) {
+        tags = parseTags(raw.tags)
+        const problem = tagsError(tags)
+        if (problem) reasons.push(`"tags": ${problem}`)
+      } else {
+        reasons.push('"tags" must be a list of text, e.g. ["physics", "exam"].')
+      }
+    }
+
     if (reasons.length > 0 || correctIndex === null) {
       invalid.push({ row, sl, reasons })
       return
@@ -90,6 +99,7 @@ export function validateRows(rows: readonly unknown[]): Validation {
       options: [options[0], options[1], options[2], options[3]],
       correctIndex,
       extra: textOf(raw.extra),
+      ...(tags !== undefined && { tags }),
     })
   })
 

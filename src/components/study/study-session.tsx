@@ -1,15 +1,18 @@
 import * as React from "react"
 
-import { DeleteNoteDialog } from "@/components/delete-note-dialog"
-import { EditNoteModal } from "@/components/edit-note-modal"
+import { DeleteNotePage } from "@/components/delete-note-page"
+import { EditNotePage } from "@/components/edit-note-page"
+import { flagBorder } from "@/components/flag-style"
 import { Button } from "@/components/ui/button"
+import { useHistoryLayer } from "@/hooks/use-history-layer"
 
 import type { StudyScope } from "../deck-tree"
 import { EmptyState, FinishedState, GoneState } from "./end-states"
-import { ExitDialog } from "./exit-dialog"
+import { ExitPage } from "./exit-page"
 import { hintFor } from "./helpers"
 import { QuestionView } from "./question-view"
 import { SessionToolbar } from "./session-toolbar"
+import { ShortcutsPage } from "./shortcuts-page"
 import { useStudyKeys } from "./use-study-keys"
 import { useStudyRun } from "./use-study-run"
 
@@ -25,14 +28,32 @@ export function StudySession({
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [confirmExit, setConfirmExit] = React.useState(false)
+  const [help, setHelp] = React.useState(false)
+  // While the flag menu is open it handles its own keys (Escape closes it).
+  const [menuOpen, setMenuOpen] = React.useState(false)
 
-  function requestExit() {
-    if (!run || s.empty || s.finished) onExit()
-    else setConfirmExit(true)
+  /** Leaves at once when nothing is in progress; otherwise asks first. */
+  function requestExit(): boolean {
+    if (!run || s.empty || s.finished) {
+      onExit()
+      return true
+    }
+    setConfirmExit(true)
+    return false
   }
 
+  // Back asks before leaving a session in progress (the prompt is its own
+  // page, which Back then dismisses).
+  useHistoryLayer(requestExit)
+
   useStudyKeys({
-    active: run !== null && !editing && !deleting && !confirmExit,
+    active:
+      run !== null &&
+      !editing &&
+      !deleting &&
+      !confirmExit &&
+      !help &&
+      !menuOpen,
     phase: run?.phase.kind ?? null,
     empty: s.empty,
     finished: s.finished,
@@ -46,6 +67,10 @@ export function StudySession({
     onNext: s.next,
     onSkipGone: s.skipGone,
     onGrade: (rating) => void s.gradeRight(rating),
+    onSuspend: () => void s.hideCurrent("suspend"),
+    onBury: () => void s.hideCurrent("bury"),
+    onFlag: (flag) => void s.flagCurrent(flag),
+    onHelp: () => setHelp(true),
   })
 
   if (s.loadError) {
@@ -66,6 +91,35 @@ export function StudySession({
     )
   }
 
+  // Editing, deleting and the leave prompt are full pages in place of the
+  // session. This component (and so the run's state) stays mounted behind them.
+  if (editing && data) {
+    return (
+      <EditNotePage
+        key={data.note.id}
+        note={data.note}
+        onClose={() => setEditing(false)}
+        onSaved={(note, resetFsrs) => {
+          if (resetFsrs) s.disableUndoFor(note.id)
+        }}
+      />
+    )
+  }
+  if (deleting && data) {
+    return (
+      <DeleteNotePage
+        key={data.note.id}
+        note={data.note}
+        onClose={() => setDeleting(false)}
+        onDeleted={(note) => s.dropDeleted(note.id)}
+      />
+    )
+  }
+  if (confirmExit) {
+    return <ExitPage onStay={() => setConfirmExit(false)} onLeave={onExit} />
+  }
+  if (help) return <ShortcutsPage onClose={() => setHelp(false)} />
+
   const counter = s.empty
     ? scope.name
     : `${Math.min(run.index + 1, run.queue.length)} / ${run.queue.length}`
@@ -78,11 +132,18 @@ export function StudySession({
         shuffle={s.shuffle}
         canUndo={s.canUndo}
         canEdit={!!data && !s.finished && !s.empty}
+        flag={data?.card.flag ?? 0}
+        suspended={data?.card.suspended ?? false}
         onExit={requestExit}
         onToggleShuffle={() => s.setShuffle(!s.shuffle)}
         onUndo={() => void s.undo()}
         onEdit={() => setEditing(true)}
         onDelete={() => setDeleting(true)}
+        onFlag={(flag) => void s.flagCurrent(flag)}
+        onSuspend={() => void s.hideCurrent("suspend")}
+        onBury={() => void s.hideCurrent("bury")}
+        onHelp={() => setHelp(true)}
+        onMenuOpenChange={setMenuOpen}
       />
 
       {s.message && (
@@ -91,10 +152,21 @@ export function StudySession({
         </p>
       )}
 
+      {s.notice && (
+        <p role="status" className="rounded-lg border px-3 py-2 text-xs">
+          {s.notice}
+        </p>
+      )}
+
       {s.empty ? (
         <EmptyState scopeName={scope.name} onExit={onExit} />
       ) : s.finished ? (
-        <FinishedState summary={s.summary} onExit={onExit} />
+        <FinishedState
+          summary={s.summary}
+          records={run.history}
+          scopeName={scope.name}
+          onExit={onExit}
+        />
       ) : s.gone ? (
         <GoneState onSkip={s.skipGone} />
       ) : !data ? (
@@ -102,16 +174,24 @@ export function StudySession({
           Loading...
         </p>
       ) : (
-        <QuestionView
-          key={run.index}
-          data={data}
-          order={s.order}
-          phase={run.phase}
-          intervals={s.intervals}
-          onPick={s.pick}
-          onNext={s.next}
-          onGrade={(rating) => void s.gradeRight(rating)}
-        />
+        <div
+          className={
+            data.card.flag > 0
+              ? `border-l-4 pl-3 ${flagBorder(data.card.flag)}`
+              : undefined
+          }
+        >
+          <QuestionView
+            key={run.index}
+            data={data}
+            order={s.order}
+            phase={run.phase}
+            intervals={s.intervals}
+            onPick={s.pick}
+            onNext={s.next}
+            onGrade={(rating) => void s.gradeRight(rating)}
+          />
+        </div>
       )}
 
       {!s.empty && !s.finished && (
@@ -119,26 +199,6 @@ export function StudySession({
           {hintFor(run.phase.kind)}
         </p>
       )}
-
-      <EditNoteModal
-        note={editing && data ? data.note : null}
-        onClose={() => setEditing(false)}
-        onSaved={(note, resetFsrs) => {
-          if (resetFsrs) s.disableUndoFor(note.id)
-        }}
-      />
-
-      <DeleteNoteDialog
-        note={deleting && data ? data.note : null}
-        onClose={() => setDeleting(false)}
-        onDeleted={(note) => s.dropDeleted(note.id)}
-      />
-
-      <ExitDialog
-        open={confirmExit}
-        onOpenChange={setConfirmExit}
-        onLeave={onExit}
-      />
     </div>
   )
 }

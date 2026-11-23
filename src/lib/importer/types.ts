@@ -14,6 +14,8 @@ export interface ValidRow {
   options: Options4
   correctIndex: OptionIndex
   extra: string
+  /** Normalized tags; undefined when the row has no "tags" key (the note's tags are then left alone). */
+  tags?: string[]
 }
 
 export interface InvalidRow {

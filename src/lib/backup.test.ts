@@ -33,6 +33,7 @@ function note(id: string, over: Partial<Note> = {}): Note {
     options: ["a", "b", "c", "d"],
     correctIndex: 0,
     extra: "",
+    tags: [],
     contentUpdatedAt: 100,
     deletedAt: null,
     ...over,
@@ -55,6 +56,10 @@ function card(id: string, over: Partial<CardRow> = {}): CardRow {
     state: 0,
     lastReview: 0,
     updatedAt: 100,
+    flag: 0,
+    suspended: false,
+    buriedUntil: 0,
+    markedAt: 0,
     ...over,
   }
 }
@@ -107,6 +112,45 @@ describe("exportBackup / parseBackup", () => {
     })
     const parsed = parseBackup(serializeBackup(file))
     expect(parsed).toEqual({ ok: true, backup: file })
+  })
+
+  it("round-trips tags", () => {
+    const tagged = data({
+      ...sample,
+      notes: [note("n1", { tags: ["a", "b"] })],
+    })
+    const parsed = parseBackup(serializeBackup(exportBackup(tagged, 1)))
+    expect(parsed.ok && parsed.backup.notes[0].tags).toEqual(["a", "b"])
+  })
+
+  it("reads a note from an older backup (no tags) as untagged", () => {
+    const file = exportBackup(sample, 1)
+    const old = JSON.parse(serializeBackup(file)) as {
+      schemaVersion: number
+      notes: Record<string, unknown>[]
+    }
+    old.schemaVersion = 2
+    for (const n of old.notes) delete n.tags
+    const parsed = parseBackup(JSON.stringify(old))
+    expect(parsed.ok && parsed.backup.notes.map((n) => n.tags)).toEqual([
+      [],
+      [],
+    ])
+  })
+
+  it("normalizes tags it reads and rejects tags that are not a list of text", () => {
+    const file = exportBackup(sample, 1)
+    const dirty = JSON.parse(serializeBackup(file)) as {
+      notes: Record<string, unknown>[]
+    }
+    dirty.notes[0].tags = ["B", "#a", "b"]
+    const parsed = parseBackup(JSON.stringify(dirty))
+    expect(parsed.ok && parsed.backup.notes[0].tags).toEqual(["a", "b"])
+
+    dirty.notes[0].tags = "a b"
+    expect(parseBackup(JSON.stringify(dirty)).ok).toBe(false)
+    dirty.notes[0].tags = [1]
+    expect(parseBackup(JSON.stringify(dirty)).ok).toBe(false)
   })
 
   it("accepts a UTF-8 BOM", () => {
@@ -287,6 +331,25 @@ describe("mergeBackup: decks", () => {
     const dead = data({ decks: [deck("a", { updatedAt: 7, deletedAt: 7 })] })
     expect(mergeBackup(live, dead).merged.decks[0].deletedAt).toBe(7)
     expect(mergeBackup(dead, live).merged.decks[0].deletedAt).toBe(7)
+  })
+})
+
+describe("mergeBackup: tags", () => {
+  it("takes the tags of the newer note edit", () => {
+    const local = data({
+      notes: [note("n1", { tags: ["a"], contentUpdatedAt: 1 })],
+    })
+    const incoming = data({
+      notes: [note("n1", { tags: ["a", "b"], contentUpdatedAt: 2 })],
+    })
+    const { merged, stats } = mergeBackup(local, incoming)
+    expect(merged.notes[0].tags).toEqual(["a", "b"])
+    expect(stats.notesUpdated).toBe(1)
+    // The other direction keeps the newer (incoming-for-it) tags too.
+    expect(mergeBackup(incoming, local).merged.notes[0].tags).toEqual([
+      "a",
+      "b",
+    ])
   })
 })
 
@@ -508,5 +571,129 @@ describe("formatMergeSummary", () => {
         reviewsAdded: 20,
       })
     ).toBe("Merged: +4 notes, +1 card updated, +20 reviews.")
+  })
+})
+
+describe("card marks in backups", () => {
+  const base = {
+    decks: [deck("s1"), deck("t1", { parentId: "s1" })],
+    notes: [note("n1")],
+  }
+  const marked = { flag: 3, suspended: true, buriedUntil: 5_000, markedAt: 700 }
+
+  it("round-trips the marks", () => {
+    const withMarks = data({ ...base, cards: [card("n1", marked)] })
+    const parsed = parseBackup(serializeBackup(exportBackup(withMarks, 1)))
+    expect(parsed.ok && parsed.backup.cards[0]).toMatchObject(marked)
+  })
+
+  it("reads a card from an older backup (no marks) as unmarked", () => {
+    const file = exportBackup(data({ ...base, cards: [card("n1", marked)] }), 1)
+    const old = JSON.parse(serializeBackup(file)) as {
+      schemaVersion: number
+      cards: Record<string, unknown>[]
+    }
+    old.schemaVersion = 3
+    for (const c of old.cards) {
+      delete c.flag
+      delete c.suspended
+      delete c.buriedUntil
+      delete c.markedAt
+    }
+    const parsed = parseBackup(JSON.stringify(old))
+    expect(parsed.ok && parsed.backup.cards[0]).toMatchObject({
+      flag: 0,
+      suspended: false,
+      buriedUntil: 0,
+      markedAt: 0,
+    })
+  })
+
+  it("rejects malformed marks", () => {
+    const file = exportBackup(data({ ...base, cards: [card("n1")] }), 1)
+    const text = serializeBackup(file)
+    const withField = (key: string, value: unknown) => {
+      const dirty = JSON.parse(text) as { cards: Record<string, unknown>[] }
+      dirty.cards[0][key] = value
+      return parseBackup(JSON.stringify(dirty)).ok
+    }
+    expect(withField("flag", 8)).toBe(false)
+    expect(withField("flag", "red")).toBe(false)
+    expect(withField("suspended", 1)).toBe(false)
+    expect(withField("buriedUntil", "tomorrow")).toBe(false)
+    expect(withField("markedAt", null)).toBe(false)
+    expect(withField("flag", 7)).toBe(true)
+  })
+
+  it("keeps the newest marks even when the other copy has newer progress", () => {
+    // Local: reviewed later (more progress), flagged long ago.
+    const local = data({
+      ...base,
+      cards: [card("n1", { lastReview: 50, reps: 5, flag: 1, markedAt: 10 })],
+    })
+    // Incoming: older progress, but suspended and re-flagged more recently.
+    const incoming = data({
+      ...base,
+      cards: [
+        card("n1", {
+          lastReview: 20,
+          reps: 2,
+          flag: 4,
+          suspended: true,
+          markedAt: 90,
+        }),
+      ],
+    })
+    for (const [a, b] of [
+      [local, incoming],
+      [incoming, local],
+    ]) {
+      expect(mergeBackup(a, b).merged.cards[0]).toMatchObject({
+        reps: 5,
+        lastReview: 50,
+        flag: 4,
+        suspended: true,
+        markedAt: 90,
+      })
+    }
+  })
+
+  it("keeps newer progress when the other copy only has older marks", () => {
+    const local = data({
+      ...base,
+      cards: [card("n1", { lastReview: 10, reps: 1, flag: 2, markedAt: 80 })],
+    })
+    const incoming = data({
+      ...base,
+      cards: [card("n1", { lastReview: 60, reps: 6, flag: 5, markedAt: 30 })],
+    })
+    const merged = mergeBackup(local, incoming).merged.cards[0]
+    expect(merged).toMatchObject({ reps: 6, flag: 2, markedAt: 80 })
+  })
+
+  it("is idempotent: merging a backup into its own result writes nothing", () => {
+    const a = data({
+      ...base,
+      cards: [card("n1", { lastReview: 50, reps: 5, flag: 1, markedAt: 10 })],
+    })
+    const b = data({
+      ...base,
+      cards: [card("n1", { lastReview: 20, reps: 2, flag: 4, markedAt: 90 })],
+    })
+    const once = mergeBackup(a, b)
+    expect(once.write.cards).toHaveLength(1)
+    expect(mergeBackup(once.merged, b).write.cards).toEqual([])
+    expect(mergeBackup(once.merged, a).write.cards).toEqual([])
+  })
+
+  it("writes nothing when only local differs in marks and local is newer", () => {
+    const local = data({
+      ...base,
+      cards: [card("n1", { flag: 6, markedAt: 99 })],
+    })
+    const incoming = data({ ...base, cards: [card("n1", { markedAt: 5 })] })
+    const result = mergeBackup(local, incoming)
+    expect(result.write.cards).toEqual([])
+    expect(result.merged.cards[0].flag).toBe(6)
   })
 })

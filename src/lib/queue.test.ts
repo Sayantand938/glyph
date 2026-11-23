@@ -163,3 +163,49 @@ describe("buildQueue", () => {
     expect(buildQueue({ cards: [], now: NOW, seed: "s" })).toEqual([])
   })
 })
+
+describe("suspended and buried cards", () => {
+  const hidden = (
+    cardId: string,
+    state: number,
+    due: number,
+    extra: Partial<QueueCard>
+  ): QueueCard => ({ ...card(cardId, state, due), ...extra })
+
+  const cards = [
+    card("new", CARD_NEW, NOW),
+    card("rev", CARD_REVIEW, NOW - DAY),
+    card("lrn", CARD_LEARNING, NOW - 1),
+    hidden("new-susp", CARD_NEW, NOW, { suspended: true }),
+    hidden("rev-susp", CARD_REVIEW, NOW - DAY, { suspended: true }),
+    hidden("lrn-susp", CARD_LEARNING, NOW - 1, { suspended: true }),
+    hidden("new-buried", CARD_NEW, NOW, { buriedUntil: NOW + HOUR }),
+    hidden("rev-buried", CARD_REVIEW, NOW - DAY, { buriedUntil: NOW + HOUR }),
+  ]
+
+  it("are not counted", () => {
+    expect(countCards(cards, NOW)).toEqual({ new: 1, learning: 1, due: 1 })
+  })
+
+  it("are not put in the queue", () => {
+    const queue = buildQueue({ cards, now: NOW, seed: "s" })
+    expect([...queue].sort()).toEqual(["lrn", "new", "rev"])
+  })
+
+  it("come back once the burying time has passed", () => {
+    const later = NOW + 2 * HOUR
+    const counts = countCards(cards, later)
+    expect(counts.new).toBe(2)
+    expect(counts.due).toBe(2)
+    const queue = buildQueue({ cards, now: later, seed: "s" })
+    expect(queue).toContain("new-buried")
+    expect(queue).toContain("rev-buried")
+    expect(queue).not.toContain("new-susp")
+  })
+
+  it("leave an all-hidden deck empty", () => {
+    const only = [hidden("a", CARD_NEW, NOW, { suspended: true })]
+    expect(countCards(only, NOW)).toEqual({ new: 0, learning: 0, due: 0 })
+    expect(buildQueue({ cards: only, now: NOW, seed: "s" })).toEqual([])
+  })
+})

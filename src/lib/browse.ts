@@ -2,6 +2,7 @@
  * Browse-screen logic: row building, search, filters, sorting and labels.
  * Pure (no DB, no React, no ts-fsrs); the DB layer fetches the notes and cards.
  */
+import { isHidden, isBuried } from "./card-marks"
 import { imageTokenRegex } from "./image"
 import {
   CARD_LEARNING,
@@ -21,6 +22,7 @@ export interface BrowseNote {
   question: string
   options: readonly string[]
   extra: string
+  tags: readonly string[]
 }
 
 /** The slice of a card row the browse list needs. */
@@ -31,6 +33,10 @@ export interface BrowseCard {
   reps: number
   lapses: number
   difficulty: number
+  /** Card marks; missing on a row from before they existed. */
+  flag?: number
+  suspended?: boolean
+  buriedUntil?: number
 }
 
 export interface BrowseRow {
@@ -42,13 +48,20 @@ export interface BrowseRow {
   sl: number | string
   /** One line of plain text for the list. */
   preview: string
-  /** Lowercased question, options and explanation, for search. */
+  /** The note's tags (normalized, sorted). */
+  tags: string[]
+  /** Lowercased question, options, explanation and tags, for search. */
   search: string
   state: number
   due: number
   reps: number
   lapses: number
   difficulty: number
+  /** 0 = no flag, 1-7 = a colour. */
+  flag: number
+  suspended: boolean
+  /** ms epoch; buried while this is in the future. */
+  buriedUntil: number
 }
 
 const NO_PROGRESS: BrowseCard = {
@@ -57,6 +70,9 @@ const NO_PROGRESS: BrowseCard = {
   reps: 0,
   lapses: 0,
   difficulty: 0,
+  flag: 0,
+  suspended: false,
+  buriedUntil: 0,
 }
 
 /**
@@ -84,14 +100,15 @@ function withoutImages(text: string): string {
 
 /**
  * One question as pretty JSON, ready to paste into a chatbot:
- * `{ question, options: { A..D }, answer: "B", extra }`. `extra` is left out
- * when empty. Math and Markdown stay as typed; image tokens become "[image]".
+ * `{ question, options: { A..D }, answer: "B", extra, tags }`. `extra` and
+ * `tags` are left out when empty. Math and Markdown stay as typed; image tokens become "[image]".
  */
 export function noteAsJson(note: {
   question: string
   options: readonly string[]
   correctIndex: number
   extra: string
+  tags?: readonly string[]
 }): string {
   const options: Record<string, string> = {}
   note.options.forEach((text, i) => {
@@ -104,6 +121,7 @@ export function noteAsJson(note: {
   }
   const extra = withoutImages(note.extra).trim()
   if (extra) data.extra = extra
+  if (note.tags && note.tags.length > 0) data.tags = [...note.tags]
   return JSON.stringify(data, null, 2)
 }
 
@@ -122,7 +140,8 @@ export function makeBrowseRow(
     subjectName,
     sl: note.sl,
     preview: previewText(note.question),
-    search: [note.question, ...note.options, note.extra]
+    tags: [...note.tags],
+    search: [note.question, ...note.options, note.extra, ...note.tags]
       .join("\n")
       .toLowerCase(),
     state: progress.state,
@@ -130,13 +149,24 @@ export function makeBrowseRow(
     reps: progress.reps,
     lapses: progress.lapses,
     difficulty: progress.difficulty,
+    flag: progress.flag ?? 0,
+    suspended: progress.suspended === true,
+    buriedUntil: progress.buriedUntil ?? 0,
   }
 }
 
 // --- Filters and search -----------------------------------------------------
 
 export type BrowseFilter =
-  "all" | "new" | "learning" | "review" | "due" | "lapsed"
+  | "all"
+  | "new"
+  | "learning"
+  | "review"
+  | "due"
+  | "lapsed"
+  | "flagged"
+  | "suspended"
+  | "buried"
 
 export const BROWSE_FILTERS: readonly { value: BrowseFilter; label: string }[] =
   [
@@ -146,17 +176,25 @@ export const BROWSE_FILTERS: readonly { value: BrowseFilter; label: string }[] =
     { value: "review", label: "Review" },
     { value: "due", label: "Due" },
     { value: "lapsed", label: "Lapsed" },
+    { value: "flagged", label: "Flagged" },
+    { value: "suspended", label: "Suspended" },
+    { value: "buried", label: "Buried" },
   ]
 
 function isLearningState(state: number): boolean {
   return state === CARD_LEARNING || state === CARD_RELEARNING
 }
 
-/** Same rule as the dashboard's Learning + Due counts and the study queue. */
+/**
+ * Same rule as the dashboard's Learning + Due counts and the study queue: a
+ * suspended or buried card is not due.
+ */
 export function isDueRow(
-  row: Pick<BrowseRow, "state" | "due">,
+  row: Pick<BrowseRow, "state" | "due"> &
+    Partial<Pick<BrowseRow, "suspended" | "buriedUntil">>,
   now: number
 ): boolean {
+  if (isHidden(row, now)) return false
   if (isLearningState(row.state)) return row.due <= now
   return row.state === CARD_REVIEW && row.due <= endOfLocalDay(now)
 }
@@ -179,6 +217,12 @@ function matchesFilter(
       return isDueRow(row, now)
     case "lapsed":
       return row.lapses > 0
+    case "flagged":
+      return row.flag > 0
+    case "suspended":
+      return row.suspended
+    case "buried":
+      return isBuried(row, now)
   }
 }
 
@@ -187,15 +231,29 @@ export function searchTerms(query: string): string[] {
   return query.toLowerCase().split(/\s+/).filter(Boolean)
 }
 
+/**
+ * Rows that match the state filter, contain every search word, carry every
+ * tag in `tags` (an exact tag match, not a text search) and, when `flags` is
+ * given and not empty, have any one of those flags.
+ */
 export function filterRows(
   rows: readonly BrowseRow[],
-  options: { query: string; filter: BrowseFilter },
+  options: {
+    query: string
+    filter: BrowseFilter
+    tags?: readonly string[]
+    flags?: readonly number[]
+  },
   now: number
 ): BrowseRow[] {
   const terms = searchTerms(options.query)
+  const tags = options.tags ?? []
+  const flags = options.flags ?? []
   return rows.filter(
     (row) =>
       matchesFilter(row, options.filter, now) &&
+      tags.every((tag) => row.tags.includes(tag)) &&
+      (flags.length === 0 || flags.includes(row.flag)) &&
       terms.every((term) => row.search.includes(term))
   )
 }
@@ -212,6 +270,9 @@ export function filterCounts(
     review: 0,
     due: 0,
     lapsed: 0,
+    flagged: 0,
+    suspended: 0,
+    buried: 0,
   }
   for (const row of rows) {
     if (row.state === CARD_NEW) counts.new += 1
@@ -219,16 +280,34 @@ export function filterCounts(
     if (row.state === CARD_REVIEW) counts.review += 1
     if (isDueRow(row, now)) counts.due += 1
     if (row.lapses > 0) counts.lapsed += 1
+    if (row.flag > 0) counts.flagged += 1
+    if (row.suspended) counts.suspended += 1
+    if (isBuried(row, now)) counts.buried += 1
   }
   return counts
+}
+
+/** How many rows carry each flag (1-7); flags nobody uses are left out. */
+export function flagCounts(
+  rows: readonly BrowseRow[]
+): { flag: number; count: number }[] {
+  const counts = new Map<number, number>()
+  for (const row of rows) {
+    if (row.flag > 0) counts.set(row.flag, (counts.get(row.flag) ?? 0) + 1)
+  }
+  return [...counts]
+    .map(([flag, count]) => ({ flag, count }))
+    .sort((a, b) => a.flag - b.flag)
 }
 
 // --- Sorting ------------------------------------------------------------------
 
 export type BrowseSort =
+  | "flag"
   | "number"
   | "question"
   | "topic"
+  | "tags"
   | "state"
   | "due"
   | "reps"
@@ -257,8 +336,18 @@ function dueKey(row: BrowseRow): number {
   return row.state === CARD_NEW ? Number.POSITIVE_INFINITY : row.due
 }
 
+/** Flagged cards first (by colour), unflagged last. */
+function flagKey(row: BrowseRow): number {
+  return row.flag === 0 ? Number.POSITIVE_INFINITY : row.flag
+}
+
 function compareBy(a: BrowseRow, b: BrowseRow, sort: BrowseSort): number {
   switch (sort) {
+    case "flag": {
+      const x = flagKey(a)
+      const y = flagKey(b)
+      return x === y ? 0 : x < y ? -1 : 1
+    }
     case "number":
       return compareNumber(a.sl, b.sl)
     case "due": {
@@ -271,6 +360,8 @@ function compareBy(a: BrowseRow, b: BrowseRow, sort: BrowseSort): number {
         `${a.subjectName} > ${a.topicName}`,
         `${b.subjectName} > ${b.topicName}`
       )
+    case "tags":
+      return compareText(a.tags.join(" "), b.tags.join(" "))
     case "state":
       return a.state - b.state
     case "reps":

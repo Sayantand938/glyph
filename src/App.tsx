@@ -4,7 +4,7 @@ import { ListIcon, SettingsIcon } from "lucide-react"
 import { BrowsePage } from "@/components/browse/browse-page"
 import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
-import { ImportModal } from "@/components/import/import-modal"
+import { ImportPage } from "@/components/import/import-page"
 import { PwaToast } from "@/components/pwa-toast"
 import { SettingsPage } from "@/components/settings-page"
 import { StudySession } from "@/components/study/study-session"
@@ -34,7 +34,7 @@ export default function App() {
         <h1 className="text-base font-semibold tracking-tight">
           glyph<span className="animate-pulse">_</span>
         </h1>
-        {!studying && !settingsOpen && !browsing && (
+        {!importOpen && !studying && !settingsOpen && !browsing && (
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -65,7 +65,7 @@ export default function App() {
       </header>
 
       <main className="flex flex-1 flex-col">
-        {notice && (
+        {notice && !importOpen && (
           <div
             role={notice.tone === "error" ? "alert" : "status"}
             className="mt-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
@@ -81,7 +81,14 @@ export default function App() {
           </div>
         )}
 
-        {studying ? (
+        {importOpen ? (
+          <ImportPage
+            onClose={() => setImportOpen(false)}
+            onImported={(summary) =>
+              setNotice({ text: formatSummary(summary), tone: "info" })
+            }
+          />
+        ) : studying ? (
           <StudySession scope={studying} onExit={() => setStudying(null)} />
         ) : browsing ? (
           <BrowsePage scope={browsing.scope} onBack={() => setBrowsing(null)} />
@@ -112,26 +119,11 @@ export default function App() {
         )}
       </main>
 
-      <footer className="space-y-1 border-t py-4 text-xs text-muted-foreground">
-        <p>
-          Your data lives only in this browser. Export a backup regularly, and
-          on iPhone or iPad add Glyph to the Home Screen so the system is less
-          likely to clear it.
-        </p>
-        <p>
-          press <kbd className="border px-1">d</kbd> to toggle dark mode
-        </p>
+      <footer className="border-t py-3 text-xs text-muted-foreground">
+        Glyph v{__APP_VERSION__}
       </footer>
 
       <PwaToast />
-
-      <ImportModal
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onImported={(summary) =>
-          setNotice({ text: formatSummary(summary), tone: "info" })
-        }
-      />
     </div>
   )
 }

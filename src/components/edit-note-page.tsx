@@ -1,16 +1,11 @@
 import * as React from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon } from "lucide-react"
 
+import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { NoteImage } from "@/components/note-image"
+import { loadTagNames } from "@/db/queries"
 import { pruneImages, saveNote } from "@/db/repo"
 import type { Note } from "@/db/types"
 import { useImagePaste } from "@/hooks/use-image-paste"
@@ -22,39 +17,14 @@ import {
   validateDraft,
   type NoteDraft,
 } from "@/lib/note-edit"
+import { formatTags, parseTags } from "@/lib/tags"
 
 const LABELS = ["A", "B", "C", "D"] as const
+const MAX_SUGGESTIONS = 12
 const INDEXES: readonly OptionIndex[] = [0, 1, 2, 3]
 
 const fieldClass =
   "w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive"
-
-export function EditNoteModal({
-  note,
-  onClose,
-  onSaved,
-}: {
-  /** The note being edited; null keeps the dialog closed. */
-  note: Note | null
-  onClose: () => void
-  /** Called after a successful save with whether FSRS progress was reset. */
-  onSaved?: (note: Note, resetFsrs: boolean) => void
-}) {
-  return (
-    <Dialog open={note !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        {note && (
-          <EditForm
-            key={note.id}
-            note={note}
-            onClose={onClose}
-            onSaved={onSaved}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 /** Small previews of the images a field's text uses. Renders nothing without any. */
 function ImageStrip({ text }: { text: string }) {
@@ -80,10 +50,12 @@ function noteToDraft(note: Note): NoteDraft {
     options: [...note.options],
     correctIndex: note.correctIndex,
     extra: note.extra,
+    tags: note.tags,
   }
 }
 
-function EditForm({
+/** Full-page editor for one question; closes itself through `onClose`. */
+export function EditNotePage({
   note,
   onClose,
   onSaved,
@@ -97,6 +69,11 @@ function EditForm({
   // never overwrites what is being typed.
   const [original] = React.useState(() => noteToDraft(note))
   const [draft, setDraft] = React.useState<NoteDraft>(original)
+  // What is typed in the Tags field; `draft.tags` is its parsed form.
+  const [tagsText, setTagsText] = React.useState(() =>
+    formatTags(original.tags)
+  )
+  const knownTags = useLiveQuery(() => loadTagNames(), [])
   const [resetFsrs, setResetFsrs] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -106,7 +83,7 @@ function EditForm({
   const { paste, pending: pendingImages, pasted } = useImagePaste(setError)
 
   // A pasted image is stored at once so it can be previewed. If the edit is
-  // cancelled (or the dialog just closed) nothing uses it, so drop it. Saving
+  // cancelled (or the page just closed) nothing uses it, so drop it. Saving
   // prunes by itself.
   React.useEffect(
     () => () => {
@@ -121,6 +98,18 @@ function EditForm({
       options[index] = update(options[index])
       return { ...d, options }
     })
+    setError(null)
+  }
+
+  // Tags used elsewhere that this question does not have yet.
+  const suggestions = (knownTags ?? [])
+    .filter((tag) => !draft.tags.includes(tag))
+    .slice(0, MAX_SUGGESTIONS)
+
+  function addTag(tag: string) {
+    const text = tagsText.trim() === "" ? tag : `${tagsText.trimEnd()} ${tag}`
+    setTagsText(text)
+    setDraft((d) => ({ ...d, tags: parseTags(text) }))
     setError(null)
   }
 
@@ -144,15 +133,28 @@ function EditForm({
   }
 
   return (
-    <form onSubmit={(e) => void save(e)} className="flex flex-col gap-4">
-      <DialogHeader>
-        <DialogTitle>Edit question</DialogTitle>
-        <DialogDescription>
-          Changes show up straight away. Study progress is kept unless you reset
-          it below. Paste a screenshot into any field to add an image.
-        </DialogDescription>
-      </DialogHeader>
-
+    <PageShell
+      title="Edit question"
+      description="Changes show up straight away. Study progress is kept unless you reset it below. Paste a screenshot into any field to add an image."
+      onBack={onClose}
+      backDisabled={busy}
+      onSubmit={(e) => void save(e)}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy || !valid || pendingImages > 0}>
+            {busy ? "Saving..." : "Save"}
+          </Button>
+        </>
+      }
+    >
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${id}-q`} className="text-xs font-medium">
           Question
@@ -252,6 +254,46 @@ function EditForm({
         <ImageStrip text={draft.extra} />
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${id}-t`} className="text-xs font-medium">
+          Tags (optional, separated by spaces or commas)
+        </label>
+        <input
+          id={`${id}-t`}
+          className={`${fieldClass} h-8 py-0`}
+          value={tagsText}
+          placeholder="e.g. physics exam-2025"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-invalid={errors.tags !== null}
+          onChange={(e) => {
+            setTagsText(e.target.value)
+            setDraft((d) => ({ ...d, tags: parseTags(e.target.value) }))
+            setError(null)
+          }}
+        />
+        {suggestions.length > 0 && (
+          <div className="flex flex-wrap gap-1" aria-label="Existing tags">
+            {suggestions.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="rounded border px-1.5 text-[0.7rem] leading-5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => addTag(tag)}
+              >
+                + {tag}
+              </button>
+            ))}
+          </div>
+        )}
+        {errors.tags && (
+          <p role="alert" className="text-xs text-destructive">
+            {errors.tags}
+          </p>
+        )}
+      </div>
+
       <label className="flex items-start gap-2 text-xs">
         <input
           type="checkbox"
@@ -279,15 +321,6 @@ function EditForm({
           {error}
         </p>
       )}
-
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={busy || !valid || pendingImages > 0}>
-          {busy ? "Saving..." : "Save"}
-        </Button>
-      </DialogFooter>
-    </form>
+    </PageShell>
   )
 }

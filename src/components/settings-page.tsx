@@ -2,6 +2,7 @@ import * as React from "react"
 import {
   ArrowLeftIcon,
   BarChart3Icon,
+  ChevronRightIcon,
   DownloadIcon,
   FileUpIcon,
   MonitorIcon,
@@ -17,6 +18,7 @@ import {
   MAX_RETENTION,
   MIN_RETENTION,
 } from "@/db/scheduler"
+import { useHistoryLayer } from "@/hooks/use-history-layer"
 import { useRetention } from "@/hooks/use-retention"
 import { useTheme, type Theme } from "@/hooks/use-theme"
 import { version } from "../../package.json"
@@ -49,6 +51,43 @@ function Section({
   )
 }
 
+function DataAction({
+  icon,
+  title,
+  description,
+  disabled = false,
+  onClick,
+}: {
+  icon: React.ReactNode
+  title: string
+  description: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="group flex w-full items-center gap-3 bg-card p-3 text-left transition-colors outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 sm:p-4"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted text-foreground transition-colors group-hover:bg-background [&_svg]:size-5">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="block text-xs text-muted-foreground">
+          {description}
+        </span>
+      </span>
+      <ChevronRightIcon
+        className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        aria-hidden
+      />
+    </button>
+  )
+}
+
 /**
  * Full-page settings: theme, data (import / export), statistics (placeholder)
  * and app info. Results of the data actions show in the notice banner that
@@ -68,6 +107,7 @@ export function SettingsPage({
   onImportBackup: () => void
 }) {
   const { theme, setTheme } = useTheme()
+  useHistoryLayer(onBack)
   const [retention, setRetention] = useRetention()
 
   return (
@@ -146,36 +186,41 @@ export function SettingsPage({
         title="Data"
         description="Your data lives only in this browser. Move it between devices with a backup file."
       >
-        <div className="flex flex-col gap-2 sm:max-w-sm">
-          <Button
-            variant="outline"
-            size="sm"
-            className="justify-start"
-            onClick={onImportJson}
-          >
-            <UploadIcon data-icon="inline-start" />
-            Import JSON
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="justify-start"
-            disabled={busy}
-            onClick={onExportBackup}
-          >
-            <DownloadIcon data-icon="inline-start" />
-            Export Backup
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="justify-start"
-            disabled={busy}
-            onClick={onImportBackup}
-          >
-            <FileUpIcon data-icon="inline-start" />
-            Import Backup
-          </Button>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Questions
+            </p>
+            <div className="divide-y overflow-hidden rounded-xl border">
+              <DataAction
+                icon={<UploadIcon aria-hidden />}
+                title="Import questions"
+                description="Add decks and questions from a JSON file."
+                onClick={onImportJson}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Backup
+            </p>
+            <div className="divide-y overflow-hidden rounded-xl border">
+              <DataAction
+                icon={<DownloadIcon aria-hidden />}
+                title="Export backup"
+                description="Save everything (decks, progress, images) to a file."
+                disabled={busy}
+                onClick={onExportBackup}
+              />
+              <DataAction
+                icon={<FileUpIcon aria-hidden />}
+                title="Restore backup"
+                description="Load a backup file and merge it into this device."
+                disabled={busy}
+                onClick={onImportBackup}
+              />
+            </div>
+          </div>
         </div>
       </Section>
 

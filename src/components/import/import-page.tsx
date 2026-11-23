@@ -2,13 +2,8 @@ import * as React from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon, CheckIcon } from "lucide-react"
 
+import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import {
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { db } from "@/db/database"
 import { commitImport } from "@/db/repo"
 import type { Note } from "@/db/types"
@@ -27,18 +22,16 @@ import { useImportFile } from "./use-import-file"
 
 const NO_NOTES: ReadonlyMap<string, Note> = new Map()
 
-export function ImportForm({
-  busy,
-  setBusy,
+/** Full-page importer for a JSON file of questions. */
+export function ImportPage({
   onClose,
   onImported,
 }: {
-  busy: boolean
-  setBusy: (busy: boolean) => void
   onClose: () => void
   onImported?: (summary: ImportSummary) => void
 }) {
   const id = React.useId()
+  const [busy, setBusy] = React.useState(false)
   const { file, fileError, readFile } = useImportFile()
 
   const [subjectId, setSubjectId] = React.useState("")
@@ -112,11 +105,12 @@ export function ImportForm({
 
   if (result) {
     return (
-      <>
-        <DialogHeader>
-          <DialogTitle>Import complete</DialogTitle>
-          <DialogDescription>{file?.name}</DialogDescription>
-        </DialogHeader>
+      <PageShell
+        title="Import complete"
+        description={file?.name}
+        onBack={onClose}
+        footer={<Button onClick={onClose}>Done</Button>}
+      >
         <p
           role="status"
           className="flex items-start gap-2 rounded-lg border p-3"
@@ -124,10 +118,7 @@ export function ImportForm({
           <CheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           {formatSummary(result)}
         </p>
-        <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
-        </DialogFooter>
-      </>
+      </PageShell>
     )
   }
 
@@ -144,14 +135,25 @@ export function ImportForm({
   else if (file && !topicRef) hint = "Choose or type a topic."
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>Import MCQs from JSON</DialogTitle>
-        <DialogDescription>
-          Re-importing the same file never resets study progress.
-        </DialogDescription>
-      </DialogHeader>
-
+    <PageShell
+      title="Import MCQs from JSON"
+      description="Re-importing the same file never resets study progress."
+      onBack={onClose}
+      backDisabled={busy}
+      footer={
+        <>
+          {hint && (
+            <p className="text-xs text-muted-foreground sm:mr-auto">{hint}</p>
+          )}
+          <Button variant="outline" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!canCommit} onClick={() => void commit()}>
+            {busy ? "Importing..." : "Import"}
+          </Button>
+        </>
+      }
+    >
       <FileDrop
         fileName={file?.name ?? null}
         disabled={busy}
@@ -217,20 +219,6 @@ export function ImportForm({
           {commitError}
         </p>
       )}
-
-      <DialogFooter>
-        {hint && (
-          <p className="text-xs text-muted-foreground sm:mr-auto sm:self-center">
-            {hint}
-          </p>
-        )}
-        <Button variant="outline" disabled={busy} onClick={onClose}>
-          Cancel
-        </Button>
-        <Button disabled={!canCommit} onClick={() => void commit()}>
-          {busy ? "Importing..." : "Import"}
-        </Button>
-      </DialogFooter>
-    </>
+    </PageShell>
   )
 }

@@ -1,3 +1,5 @@
+import { marksOf } from "@/lib/card-marks"
+
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
 import type { Note } from "../types"
@@ -29,7 +31,11 @@ export async function saveNote(
 
     const card = await db.cards.get(existing.id)
     if (resetFsrs || !card) {
-      await db.cards.put(emptyCardRow(saved, now))
+      // A reset clears progress, not the flag or a suspend.
+      await db.cards.put({
+        ...emptyCardRow(saved, now),
+        ...(card ? marksOf(card) : {}),
+      })
     } else if (card.topicId !== saved.topicId) {
       await db.cards.update(card.cardId, { topicId: saved.topicId })
     }

@@ -5,6 +5,7 @@ import {
   filterCounts,
   filterRows,
   formatDue,
+  flagCounts,
   isDueRow,
   makeBrowseRow,
   noteAsJson,
@@ -31,6 +32,7 @@ function note(over: Partial<BrowseNote> = {}): BrowseNote {
     question: "What is the SI unit of force?",
     options: ["Newton", "Joule", "Watt", "Pascal"],
     extra: "Named after Isaac Newton.",
+    tags: [],
     ...over,
   }
 }
@@ -151,6 +153,52 @@ describe("searchTerms and filterRows", () => {
   })
 })
 
+describe("tags in browse", () => {
+  const rows = [
+    row({ id: "a", question: "Alpha", tags: ["exam", "physics"] }),
+    row({ id: "b", question: "Bravo", tags: ["physics"] }),
+    row({ id: "c", question: "Charlie", tags: [] }),
+  ]
+  const ids = (tags: string[], query = "") =>
+    filterRows(rows, { query, filter: "all", tags }, NOW).map((r) => r.id)
+
+  it("copies the tags and searches them as text", () => {
+    expect(rows[0].tags).toEqual(["exam", "physics"])
+    expect(rows[0].search).toContain("exam")
+    expect(ids([], "exam")).toEqual(["a"])
+  })
+
+  it("keeps the row's tags independent of the note's array", () => {
+    const tags = ["x"]
+    const r = row({ tags })
+    tags.push("y")
+    expect(r.tags).toEqual(["x"])
+  })
+
+  it("filters by tag, needing every selected tag", () => {
+    expect(ids([])).toEqual(["a", "b", "c"])
+    expect(ids(["physics"])).toEqual(["a", "b"])
+    expect(ids(["physics", "exam"])).toEqual(["a"])
+    expect(ids(["nope"])).toEqual([])
+  })
+
+  it("matches a tag exactly, not as a substring", () => {
+    expect(ids(["phys"])).toEqual([])
+  })
+
+  it("combines the tag filter with search", () => {
+    expect(ids(["physics"], "bravo")).toEqual(["b"])
+  })
+
+  it("sorts by tags, untagged first", () => {
+    expect(sortRows(rows, "tags", "asc").map((r) => r.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ])
+  })
+})
+
 describe("filters", () => {
   const rows = [
     row({ id: "new" }, { state: 0, due: NOW - DAY, reps: 0 }),
@@ -193,6 +241,9 @@ describe("filters", () => {
       review: 3,
       due: 4,
       lapsed: 1,
+      flagged: 0,
+      suspended: 0,
+      buried: 0,
     })
   })
 
@@ -355,6 +406,28 @@ describe("labels", () => {
   })
 })
 
+describe("noteAsJson with tags", () => {
+  const base = {
+    question: "Q",
+    options: ["a", "b", "c", "d"],
+    correctIndex: 0,
+    extra: "",
+  }
+
+  it("adds the tags after the other fields when there are some", () => {
+    const text = noteAsJson({ ...base, tags: ["exam", "physics"] })
+    expect(JSON.parse(text).tags).toEqual(["exam", "physics"])
+    expect(Object.keys(JSON.parse(text)).at(-1)).toBe("tags")
+  })
+
+  it("leaves them out when empty or missing", () => {
+    expect(JSON.parse(noteAsJson({ ...base, tags: [] }))).not.toHaveProperty(
+      "tags"
+    )
+    expect(JSON.parse(noteAsJson(base))).not.toHaveProperty("tags")
+  })
+})
+
 describe("noteAsJson", () => {
   const full = {
     question: "What is the SI unit of force?",
@@ -416,5 +489,83 @@ describe("noteAsJson", () => {
     )
     expect(data.question).toBe('Solve $x^2 = 4$ for "x"\nShow work.')
     expect(data.options.A).toBe("\\(2\\)")
+  })
+})
+
+describe("flags, suspended and buried cards", () => {
+  const rows = [
+    row({ id: "plain" }, { state: 2, due: NOW - DAY }),
+    row({ id: "red" }, { state: 2, due: NOW - DAY, flag: 1 }),
+    row({ id: "blue" }, { state: 0, flag: 4 }),
+    row({ id: "susp" }, { state: 2, due: NOW - DAY, suspended: true }),
+    row(
+      { id: "buried" },
+      { state: 2, due: NOW - DAY, buriedUntil: NOW + HOUR }
+    ),
+    row(
+      { id: "was-buried" },
+      { state: 2, due: NOW - DAY, buriedUntil: NOW - 1 }
+    ),
+  ]
+  const ids = (filter: Parameters<typeof filterRows>[1]["filter"]) =>
+    filterRows(rows, { query: "", filter }, NOW).map((r) => r.id)
+
+  it("reads the marks from the card, unmarked when absent", () => {
+    expect(rows[1]).toMatchObject({ flag: 1, suspended: false, buriedUntil: 0 })
+    expect(rows[3].suspended).toBe(true)
+    const none = makeBrowseRow(note(), undefined, "T", "S")
+    expect(none).toMatchObject({ flag: 0, suspended: false, buriedUntil: 0 })
+  })
+
+  it("filters flagged, suspended and buried rows", () => {
+    expect(ids("flagged")).toEqual(["red", "blue"])
+    expect(ids("suspended")).toEqual(["susp"])
+    expect(ids("buried")).toEqual(["buried"])
+  })
+
+  it("keeps hidden rows out of Due, matching the dashboard", () => {
+    expect(ids("due")).toEqual(["plain", "red", "was-buried"])
+    const counts = countCards(
+      rows.map((r) => ({ ...r, cardId: r.id })),
+      NOW
+    )
+    expect(ids("due")).toHaveLength(counts.due + counts.learning)
+    expect(isDueRow({ state: 2, due: NOW - DAY, suspended: true }, NOW)).toBe(
+      false
+    )
+  })
+
+  it("filters by flag colour (any of the chosen flags)", () => {
+    const by = (flags: number[]) =>
+      filterRows(rows, { query: "", filter: "all", flags }, NOW).map(
+        (r) => r.id
+      )
+    expect(by([1])).toEqual(["red"])
+    expect(by([1, 4])).toEqual(["red", "blue"])
+    expect(by([])).toHaveLength(rows.length)
+  })
+
+  it("counts every filter, including the new ones", () => {
+    expect(filterCounts(rows, NOW)).toMatchObject({
+      flagged: 2,
+      suspended: 1,
+      buried: 1,
+    })
+  })
+
+  it("counts rows per flag, leaving out unused flags", () => {
+    const more = [...rows, row({ id: "red2" }, { flag: 1 })]
+    expect(flagCounts(more)).toEqual([
+      { flag: 1, count: 2 },
+      { flag: 4, count: 1 },
+    ])
+    expect(flagCounts([])).toEqual([])
+  })
+
+  it("sorts flagged rows first, by colour, and unflagged last", () => {
+    const asc = sortRows(rows, "flag", "asc").map((r) => r.id)
+    expect(asc.slice(0, 2)).toEqual(["red", "blue"])
+    const desc = sortRows(rows, "flag", "desc").map((r) => r.id)
+    expect(desc.slice(-2)).toEqual(["blue", "red"])
   })
 })

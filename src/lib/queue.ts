@@ -2,6 +2,7 @@
  * Study-queue and dashboard-count logic: pure (no DB, no React, no ts-fsrs).
  * Cards are passed in as plain objects; the DB layer fetches them.
  */
+import { isHidden } from "./card-marks"
 import { seededShuffle } from "./shuffle"
 
 // Mirrors the ts-fsrs State enum (kept in sync by queue.test.ts).
@@ -17,6 +18,10 @@ export interface QueueCard {
   state: number
   /** ms epoch */
   due: number
+  /** Suspended cards are left out of the queue and the counts. */
+  suspended?: boolean
+  /** ms epoch; a card is buried (left out) while this is still in the future. */
+  buriedUntil?: number
 }
 
 export interface DeckCounts {
@@ -48,6 +53,8 @@ export function endOfLocalDay(now: number): number {
  * 14:03 tomorrow), and a session started at 09:00 would otherwise skip that
  * card and show it a day late. Simulated over a year, this cut lapses by
  * about 14% and the average lateness from 0.6 days to about 0.
+ *
+ * Suspended and buried cards are not counted at all.
  */
 export function countCards(
   cards: readonly QueueCard[],
@@ -56,6 +63,7 @@ export function countCards(
   const counts: DeckCounts = { new: 0, learning: 0, due: 0 }
   const endOfDay = endOfLocalDay(now)
   for (const card of cards) {
+    if (isHidden(card, now)) continue
     if (card.state === CARD_NEW) counts.new += 1
     else if (isLearning(card.state) && card.due <= now) counts.learning += 1
     else if (card.state === CARD_REVIEW && card.due <= endOfDay) counts.due += 1
@@ -97,6 +105,7 @@ function byDue(a: QueueCard, b: QueueCard): number {
  * Builds the session as a list of cardIds, once at session start.
  * Learning/Relearning cards due now come first (most overdue first), then Review
  * cards due today, then all New cards (there is no daily new-card limit).
+ * Suspended and buried cards are skipped.
  */
 export function buildQueue({
   cards,
@@ -110,6 +119,7 @@ export function buildQueue({
   const endOfDay = endOfLocalDay(now)
 
   for (const card of cards) {
+    if (isHidden(card, now)) continue
     if (card.state === CARD_NEW) fresh.push(card)
     else if (isLearning(card.state) && card.due <= now) learning.push(card)
     else if (card.state === CARD_REVIEW && card.due <= endOfDay)
