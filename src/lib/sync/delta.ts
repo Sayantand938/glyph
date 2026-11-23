@@ -10,9 +10,12 @@
  * merge is idempotent, so a row sent twice costs nothing.
  *
  * A mark is only trusted together with a check at the end of every sync: both
- * devices count their rows after merging and the counts must match. If they do
- * not (a clock set back, data wiped on one side, anything unforeseen) the sync
- * repeats once as a full sync, which sends everything.
+ * devices fingerprint their data after merging (`SyncDigests`: per table, the
+ * row count and a hash of every row's id and change stamp) and the fingerprints
+ * must match. If they do not (a clock set back, data wiped on one side, a row
+ * that came from a third device or a restored backup and so carries an old
+ * stamp, a picture that never arrived) the sync repeats once as a full sync,
+ * which sends everything.
  */
 
 /** Rows changed this long before the mark are sent again, in case clocks differ. */
@@ -29,38 +32,155 @@ export const PART_ROWS = {
   settings: 500,
 } as const
 
-/** How many rows of each table a device holds; equal on both sides after a sync. */
-export interface RowCounts {
-  decks: number
-  notes: number
-  cards: number
-  reviews: number
+/**
+ * A fingerprint of one table: how many rows it holds and an order-independent
+ * hash of each row's id and change stamp (see the `*Stamp` functions). Two
+ * devices that merged each other's data hold the same rows with the same
+ * stamps, so the fingerprints match; a row that is missing, extra or changed
+ * on one side (even when the row counts agree) makes them differ.
+ */
+export interface RowDigest {
+  count: number
+  /** 16 hex digits. */
+  hash: string
 }
 
-export function countsEqual(a: RowCounts, b: RowCounts): boolean {
-  return (
-    a.decks === b.decks &&
-    a.notes === b.notes &&
-    a.cards === b.cards &&
-    a.reviews === b.reviews
+/** The tables a sync compares, in the order a difference is reported. */
+export const DIGEST_TABLES = [
+  "decks",
+  "notes",
+  "cards",
+  "reviews",
+  "settings",
+  "images",
+] as const
+
+export type DigestTable = (typeof DIGEST_TABLES)[number]
+
+/** One fingerprint per table. `images` covers the pictures live notes use. */
+export type SyncDigests = Record<DigestTable, RowDigest>
+
+/** How a table is named to the person when a sync cannot make it match. */
+export const DIGEST_LABELS: Record<DigestTable, string> = {
+  decks: "subjects and topics",
+  notes: "questions",
+  cards: "card progress",
+  reviews: "review history",
+  settings: "settings",
+  images: "pictures",
+}
+
+/** Two independent 32-bit hashes of a text (the core of cyrb53). */
+function hashPair(text: string): [number, number] {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507)
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507)
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return [h1 >>> 0, h2 >>> 0]
+}
+
+const hex8 = (n: number) => n.toString(16).padStart(8, "0")
+
+/**
+ * Builds a `RowDigest` from row stamps added in any order. Each stamp's hash is
+ * added (mod 2^32, in two lanes) to the running total, so order does not matter
+ * and nothing is kept per row: it is cheap for a hundred thousand rows.
+ */
+export class DigestBuilder {
+  private count = 0
+  private a = 0
+  private b = 0
+
+  add(stamp: string): void {
+    const [x, y] = hashPair(stamp)
+    this.a = (this.a + x) >>> 0
+    this.b = (this.b + y) >>> 0
+    this.count += 1
+  }
+
+  result(): RowDigest {
+    return { count: this.count, hash: hex8(this.a) + hex8(this.b) }
+  }
+}
+
+/** The digest of these stamps. */
+export function digestOf(stamps: Iterable<string>): RowDigest {
+  const builder = new DigestBuilder()
+  for (const stamp of stamps) builder.add(stamp)
+  return builder.result()
+}
+
+/**
+ * What identifies one row for the digest: its id and the time(s) the merge
+ * decides it by. Content is not hashed (a row with the same stamp but other
+ * content cannot be healed by sending it again, the merge keeps the local copy),
+ * so a digest mismatch always means "sending more can fix this".
+ */
+export const deckStamp = (d: {
+  id: string
+  updatedAt: number
+  deletedAt: number | null
+}) => `${d.id}|${d.updatedAt}|${d.deletedAt ?? ""}`
+
+export const noteStamp = (n: {
+  id: string
+  contentUpdatedAt: number
+  deletedAt: number | null
+}) => `${n.id}|${n.contentUpdatedAt}|${n.deletedAt ?? ""}`
+
+export const cardStamp = (c: {
+  cardId: string
+  lastReview: number
+  updatedAt: number
+  markedAt: number
+}) => `${c.cardId}|${c.lastReview}|${c.updatedAt}|${c.markedAt}`
+
+export const settingStamp = (s: { key: string; updatedAt: number }) =>
+  `${s.key}|${s.updatedAt}`
+
+/** Reviews and images are never edited, so their id says it all. */
+export const idStamp = (id: string) => id
+
+export function digestsEqual(a: SyncDigests, b: SyncDigests): boolean {
+  return differingTables(a, b).length === 0
+}
+
+/** The tables whose digests differ, in `DIGEST_TABLES` order. */
+export function differingTables(a: SyncDigests, b: SyncDigests): DigestTable[] {
+  return DIGEST_TABLES.filter(
+    (table) =>
+      a[table].count !== b[table].count || a[table].hash !== b[table].hash
   )
 }
 
-/** Reads counts from a message; null when it is not four whole numbers. */
-export function parseCounts(value: unknown): RowCounts | null {
+function parseDigest(value: unknown): RowDigest | null {
+  if (typeof value !== "object" || value === null) return null
+  const { count, hash } = value as Record<string, unknown>
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+    return null
+  }
+  if (typeof hash !== "string" || !/^[0-9a-f]{16}$/.test(hash)) return null
+  return { count, hash }
+}
+
+/** Reads digests from a message; null when any table's digest is not valid. */
+export function parseDigests(value: unknown): SyncDigests | null {
   if (typeof value !== "object" || value === null) return null
   const v = value as Record<string, unknown>
-  const keys = ["decks", "notes", "cards", "reviews"] as const
-  for (const key of keys) {
-    const n = v[key]
-    if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return null
+  const out: Partial<SyncDigests> = {}
+  for (const table of DIGEST_TABLES) {
+    const digest = parseDigest(v[table])
+    if (!digest) return null
+    out[table] = digest
   }
-  return {
-    decks: v.decks as number,
-    notes: v.notes as number,
-    cards: v.cards as number,
-    reviews: v.reviews as number,
-  }
+  return out as SyncDigests
 }
 
 /**

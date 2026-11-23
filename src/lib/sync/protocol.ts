@@ -1,4 +1,4 @@
-import { parseCounts, type RowCounts } from "./delta"
+import { parseDigests, type SyncDigests } from "./delta"
 
 /**
  * The wire format of a sync, over one ordered WebRTC data channel. Both devices
@@ -12,13 +12,20 @@ import { parseCounts, type RowCounts } from "./delta"
  *         `readBackupParts`); a round is any number of parts, each merged as it
  *         arrives, so no message or buffer is ever as big as the whole data
  *   end   the round has no more parts; `parts` is how many were sent
- *   ok    every part of the other device's round is merged; `counts` are this
- *         device's row counts then, which must equal the other's
+ *   ok    every part of the other device's round is merged; `digests` are this
+ *         device's fingerprints then (per table, the row count and a hash of
+ *         every row's id and change stamp), which must equal the other's
+ *   ping  "still here": sent every few seconds by both devices, so a quiet
+ *         connection means the other device is gone (asleep, out of wifi), not
+ *         just busy merging
  *   fail  something went wrong
  */
 
-/** Version 2 sends parts; version 1 sent one whole backup and is not understood. */
-export const SYNC_VERSION = 2
+/**
+ * Version 3 compares digests at the end; version 2 compared row counts and
+ * version 1 sent one whole backup. Older versions are refused with a message.
+ */
+export const SYNC_VERSION = 3
 
 /** Small enough for every browser's data channel (the interoperable limit is 16 KiB). */
 export const CHUNK_BYTES = 16 * 1024
@@ -30,7 +37,8 @@ export type SyncMessage =
   | { t: "plan"; mode: SyncMode; round: number }
   | { t: "part"; bytes: number }
   | { t: "end"; parts: number }
-  | { t: "ok"; counts: RowCounts }
+  | { t: "ok"; digests: SyncDigests }
+  | { t: "ping" }
   | { t: "fail"; reason: string }
 
 export function hiMessage(device: string): string {
@@ -49,8 +57,12 @@ export function endMessage(parts: number): string {
   return JSON.stringify({ t: "end", parts })
 }
 
-export function okMessage(counts: RowCounts): string {
-  return JSON.stringify({ t: "ok", counts })
+export function okMessage(digests: SyncDigests): string {
+  return JSON.stringify({ t: "ok", digests })
+}
+
+export function pingMessage(): string {
+  return JSON.stringify({ t: "ping" })
 }
 
 export function failMessage(reason: string): string {
@@ -89,9 +101,11 @@ export function parseMessage(text: string): SyncMessage | null {
     case "end":
       return isCount(m.parts) ? { t: "end", parts: m.parts } : null
     case "ok": {
-      const counts = parseCounts(m.counts)
-      return counts ? { t: "ok", counts } : null
+      const digests = parseDigests(m.digests)
+      return digests ? { t: "ok", digests } : null
     }
+    case "ping":
+      return { t: "ping" }
     case "fail":
       return {
         t: "fail",

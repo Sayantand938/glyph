@@ -11,7 +11,19 @@ import {
   okMessage,
   parseMessage,
   partMessage,
+  pingMessage,
   planMessage,
+  DIGEST_TABLES,
+  DigestBuilder,
+  cardStamp,
+  deckStamp,
+  differingTables,
+  digestOf,
+  digestsEqual,
+  idStamp,
+  noteStamp,
+  parseDigests,
+  settingStamp,
   splitChunks,
 } from "@/lib/sync"
 
@@ -84,12 +96,19 @@ describe("pairing codes", () => {
 })
 
 describe("control messages", () => {
-  const counts = { decks: 2, notes: 3, cards: 3, reviews: 40 }
+  const digests = {
+    decks: digestOf(["d1", "d2"]),
+    notes: digestOf(["n1|5|", "n2|6|", "n3|7|"]),
+    cards: digestOf(["c1|0|1|0"]),
+    reviews: digestOf(["r1", "r2"]),
+    settings: digestOf([]),
+    images: digestOf(["i1"]),
+  }
 
   it("round-trips every message", () => {
     expect(parseMessage(hiMessage("dev-1"))).toEqual({
       t: "hi",
-      v: 2,
+      v: 3,
       device: "dev-1",
     })
     expect(parseMessage(planMessage("delta", 1))).toEqual({
@@ -99,7 +118,8 @@ describe("control messages", () => {
     })
     expect(parseMessage(partMessage(1234))).toEqual({ t: "part", bytes: 1234 })
     expect(parseMessage(endMessage(7))).toEqual({ t: "end", parts: 7 })
-    expect(parseMessage(okMessage(counts))).toEqual({ t: "ok", counts })
+    expect(parseMessage(okMessage(digests))).toEqual({ t: "ok", digests })
+    expect(parseMessage(pingMessage())).toEqual({ t: "ping" })
     expect(parseMessage(failMessage("nope"))).toEqual({
       t: "fail",
       reason: "nope",
@@ -122,7 +142,12 @@ describe("control messages", () => {
       '{"t":"part","bytes":"3"}',
       '{"t":"end","parts":-2}',
       '{"t":"ok"}',
-      '{"t":"ok","counts":{"decks":1,"notes":1,"cards":1}}',
+      '{"t":"ok","counts":{"decks":1,"notes":1,"cards":1,"reviews":1}}',
+      '{"t":"ok","digests":{"decks":{"count":1,"hash":"00000000deadbeef"}}}',
+      JSON.stringify({
+        t: "ok",
+        digests: { ...digests, notes: { count: 1, hash: "not hex" } },
+      }),
     ]) {
       expect(parseMessage(text)).toBeNull()
     }
@@ -175,5 +200,92 @@ describe("chunks", () => {
     if (!("push" in r)) throw new Error("begin failed")
     expect(r.push(bytes(6)).status).toBe("more")
     expect(r.push(bytes(5)).status).toBe("error")
+  })
+})
+
+describe("digests", () => {
+  const stamps = Array.from({ length: 500 }, (_, i) => `row-${i}|${1000 + i}`)
+
+  it("ignores the order of the rows", () => {
+    expect(digestOf([...stamps].reverse())).toEqual(digestOf(stamps))
+    const shuffled = [...stamps].sort((x, y) => (x < y ? 1 : -1))
+    expect(digestOf(shuffled)).toEqual(digestOf(stamps))
+  })
+
+  it("changes when one stamp changes, a row is added or one is missing", () => {
+    const base = digestOf(stamps)
+    const edited = [...stamps]
+    edited[250] = "row-250|1251"
+    expect(digestOf(edited)).not.toEqual(base)
+    expect(digestOf([...stamps, "row-new|1"]).hash).not.toBe(base.hash)
+    expect(digestOf(stamps.slice(1)).hash).not.toBe(base.hash)
+    // Same count, different content: only the hash tells.
+    expect(digestOf(edited).count).toBe(base.count)
+  })
+
+  it("counts rows and gives 16 hex digits, also for no rows", () => {
+    const d = digestOf(stamps)
+    expect(d.count).toBe(500)
+    expect(d.hash).toMatch(/^[0-9a-f]{16}$/)
+    expect(digestOf([])).toEqual({ count: 0, hash: "0000000000000000" })
+    const builder = new DigestBuilder()
+    builder.add("a")
+    builder.add("b")
+    expect(builder.result()).toEqual(digestOf(["b", "a"]))
+  })
+
+  it("does not cancel out a row that appears twice", () => {
+    expect(digestOf(["a", "a"]).hash).not.toBe(digestOf([]).hash)
+  })
+
+  it("takes the stamp a row is merged by", () => {
+    const note = { id: "n", contentUpdatedAt: 5, deletedAt: null }
+    expect(noteStamp(note)).not.toBe(
+      noteStamp({ ...note, contentUpdatedAt: 6 })
+    )
+    expect(noteStamp(note)).not.toBe(noteStamp({ ...note, deletedAt: 7 }))
+    const deck = { id: "d", updatedAt: 1, deletedAt: null }
+    expect(deckStamp(deck)).not.toBe(deckStamp({ ...deck, deletedAt: 2 }))
+    const card = { cardId: "c", lastReview: 1, updatedAt: 2, markedAt: 3 }
+    expect(cardStamp(card)).not.toBe(cardStamp({ ...card, markedAt: 4 }))
+    expect(cardStamp(card)).not.toBe(cardStamp({ ...card, lastReview: 9 }))
+    expect(settingStamp({ key: "retention", updatedAt: 1 })).not.toBe(
+      settingStamp({ key: "retention", updatedAt: 2 })
+    )
+    expect(idStamp("x")).toBe("x")
+  })
+
+  it("names the tables that differ, in a fixed order", () => {
+    const same = parseDigests(
+      Object.fromEntries(DIGEST_TABLES.map((t) => [t, digestOf([t])]))
+    )
+    if (!same) throw new Error("digests did not parse")
+    expect(digestsEqual(same, { ...same })).toBe(true)
+    const other = {
+      ...same,
+      images: digestOf(["other"]),
+      cards: digestOf(["other"]),
+    }
+    expect(digestsEqual(same, other)).toBe(false)
+    expect(differingTables(same, other)).toEqual(["cards", "images"])
+  })
+
+  it("reads only complete, well-formed digests", () => {
+    const good = Object.fromEntries(
+      DIGEST_TABLES.map((t) => [t, digestOf([t])])
+    )
+    const zeros = "0".repeat(16)
+    expect(parseDigests(good)).toEqual(good)
+    expect(parseDigests(null)).toBeNull()
+    expect(parseDigests({ ...good, images: undefined })).toBeNull()
+    expect(
+      parseDigests({ ...good, notes: { count: -1, hash: zeros } })
+    ).toBeNull()
+    expect(
+      parseDigests({ ...good, notes: { count: 1.5, hash: zeros } })
+    ).toBeNull()
+    expect(
+      parseDigests({ ...good, notes: { count: 1, hash: "ABCDEF0123456789" } })
+    ).toBeNull()
   })
 })

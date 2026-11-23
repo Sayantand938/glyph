@@ -12,7 +12,17 @@
  */
 import { BACKUP_APP, BACKUP_SCHEMA_VERSION } from "@/lib/backup"
 import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
-import { PART_ROWS, pagesOf, type RowCounts } from "@/lib/sync"
+import {
+  DigestBuilder,
+  PART_ROWS,
+  cardStamp,
+  deckStamp,
+  idStamp,
+  noteStamp,
+  pagesOf,
+  settingStamp,
+  type SyncDigests,
+} from "@/lib/sync"
 
 import { db } from "./database"
 import type {
@@ -54,17 +64,56 @@ export async function imageToBackup(row: ImageRow): Promise<BackupImage> {
   }
 }
 
-/** How many rows each table holds; equal on two devices after a sync. */
-export async function countRows(): Promise<RowCounts> {
+/**
+ * A fingerprint of every table (see `SyncDigests`), equal on two devices after a
+ * sync. It reads the stamps of every row, tombstones included, one row at a time
+ * (a cursor, never the whole table in memory); reviews are read by key only.
+ * The `images` digest covers the pictures that live notes use and this device
+ * holds, so a picture that never arrived shows as a difference.
+ */
+export async function computeDigests(): Promise<SyncDigests> {
   return db.transaction(
     "r",
-    [db.decks, db.notes, db.cards, db.revlog],
-    async () => ({
-      decks: await db.decks.count(),
-      notes: await db.notes.count(),
-      cards: await db.cards.count(),
-      reviews: await db.revlog.count(),
-    })
+    [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
+    async () => {
+      const decks = new DigestBuilder()
+      const notes = new DigestBuilder()
+      const cards = new DigestBuilder()
+      const reviews = new DigestBuilder()
+      const settings = new DigestBuilder()
+      const images = new DigestBuilder()
+
+      await db.decks.each((deck) => decks.add(deckStamp(deck)))
+      const referenced = new Set<string>()
+      await db.notes.each((note) => {
+        notes.add(noteStamp(note))
+        if (note.deletedAt === null) {
+          for (const id of imageIdsInNotes([note])) referenced.add(id)
+        }
+      })
+      await db.cards.each((card) => cards.add(cardStamp(card)))
+      for (const id of (await db.revlog
+        .toCollection()
+        .primaryKeys()) as string[]) {
+        reviews.add(idStamp(id))
+      }
+      await db.settings.each((row) => settings.add(settingStamp(row)))
+      if (referenced.size > 0) {
+        const held = new Set(
+          (await db.images.toCollection().primaryKeys()) as string[]
+        )
+        for (const id of referenced) if (held.has(id)) images.add(idStamp(id))
+      }
+
+      return {
+        decks: decks.result(),
+        notes: notes.result(),
+        cards: cards.result(),
+        reviews: reviews.result(),
+        settings: settings.result(),
+        images: images.result(),
+      }
+    }
   )
 }
 

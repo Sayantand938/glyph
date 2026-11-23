@@ -8,14 +8,25 @@
  *   2. send a round: `delta` (rows changed since the last complete sync with this
  *      device) or, with no usable mark, `full`; a round is a list of parts;
  *   3. merge the other device's parts as they arrive, then answer `ok` with this
- *      device's row counts;
- *   4. when both counts are known they must match: then the sync is complete and
- *      the mark for the other device is set; if not, and a `delta` was involved,
- *      both repeat as a `full` round once (self-healing); otherwise it fails.
+ *      device's digests (per table, the row count and a hash of every row's id
+ *      and change stamp);
+ *   4. when both digests are known they must match: then the sync is complete
+ *      and the mark for the other device is set; if not, and a `delta` was
+ *      involved, both repeat as a `full` round once (self-healing); otherwise it
+ *      fails and names the tables that differ.
  * The mark is only set after that check, so a bad mark can cost one full sync
  * but never lets two devices silently drift apart.
+ *
+ * Both devices also ping each other every few seconds; one that hears nothing
+ * for `STALL_MS` gives up with a clear message instead of waiting forever (the
+ * other device went to sleep or off the wifi).
  */
-import { countsEqual, deltaSince, type RowCounts } from "./delta"
+import {
+  DIGEST_LABELS,
+  deltaSince,
+  differingTables,
+  type SyncDigests,
+} from "./delta"
 import {
   Reassembler,
   SYNC_VERSION,
@@ -25,6 +36,7 @@ import {
   okMessage,
   parseMessage,
   partMessage,
+  pingMessage,
   planMessage,
   splitChunks,
   type SyncMode,
@@ -47,8 +59,21 @@ export interface SyncDeps<Stats> {
   merge(text: string): Promise<Stats>
   emptyStats(): Stats
   addStats(a: Stats, b: Stats): Stats
-  counts(): Promise<RowCounts>
+  /** Fingerprints this device's data, once the other device's round is merged. */
+  digests(): Promise<SyncDigests>
+  /**
+   * Calls `fn` every `ms` until the returned function is called. Defaults to
+   * `setInterval`; tests pass a fake.
+   */
+  every?(fn: () => void, ms: number): () => void
+  /** How long a silent connection is tolerated (`STALL_MS` if absent; 0 = forever). */
+  stallMs?: number
 }
+
+/** A connection that stays silent this long (ms) is declared dead. */
+export const STALL_MS = 30_000
+/** The silence is counted in this many ticks; a ping goes out on each. */
+const STALL_TICKS = 6
 
 export interface SyncIO {
   sendText(text: string): void
@@ -95,8 +120,11 @@ export class SyncSession<Stats> {
   private ourMode: SyncMode = "full"
   private incoming: Incoming | null = null
   private sentParts = 0
-  private ourOk: { round: number; counts: RowCounts } | null = null
-  private peerOk: { round: number; counts: RowCounts } | null = null
+  private ourOk: { round: number; digests: SyncDigests } | null = null
+  private peerOk: { round: number; digests: SyncDigests } | null = null
+  private stopTicking: (() => void) | null = null
+  /** Ticks since anything arrived from the other device. */
+  private quietTicks = 0
   private stats: Stats
   private readonly modes: SyncMode[] = []
 
@@ -111,11 +139,54 @@ export class SyncSession<Stats> {
   /** Call when the connection is open. */
   start(): void {
     this.io.sendText(hiMessage(this.deps.deviceId))
+    this.startWatchdog()
   }
 
   /** The connection ended (or never opened). Later events are ignored. */
   stop(): void {
+    this.end()
+  }
+
+  private end(): void {
     this.over = true
+    this.stopTicking?.()
+    this.stopTicking = null
+  }
+
+  /**
+   * Pings the other device on every tick and gives up when nothing at all has
+   * arrived from it for `STALL_TICKS` ticks. Anything received counts (a part, a
+   * ping, an `ok`), so a big slow sync never trips it while the other device
+   * keeps answering, and a device busy merging keeps the line alive by pinging.
+   */
+  private startWatchdog(): void {
+    const stallMs = this.deps.stallMs ?? STALL_MS
+    if (stallMs <= 0 || this.over) return
+    const every =
+      this.deps.every ??
+      ((fn: () => void, ms: number) => {
+        const id = setInterval(fn, ms)
+        return () => clearInterval(id)
+      })
+    this.stopTicking = every(
+      () => {
+        if (this.over) return
+        this.quietTicks += 1
+        if (this.quietTicks >= STALL_TICKS) {
+          const seconds = Math.round(stallMs / 1000)
+          return this.fail(
+            `The other device has not answered for ${seconds} seconds. It may have gone to sleep, lost the wifi or closed Glyph. Keep both screens on and try again; what arrived is already saved.`,
+            true
+          )
+        }
+        try {
+          this.io.sendText(pingMessage())
+        } catch {
+          // The connection is gone; the silence will say so.
+        }
+      },
+      Math.max(1, Math.round(stallMs / STALL_TICKS))
+    )
   }
 
   get finished(): boolean {
@@ -124,9 +195,12 @@ export class SyncSession<Stats> {
 
   onText(text: string): void {
     if (this.over) return
+    this.quietTicks = 0
     const m = parseMessage(text)
     if (!m) return
     switch (m.t) {
+      case "ping":
+        return
       case "hi":
         return this.onHi(m.v, m.device)
       case "plan":
@@ -144,11 +218,11 @@ export class SyncSession<Stats> {
         return this.onEnd(m.parts)
       case "ok":
         if (!this.incoming) return
-        this.peerOk = { round: this.incoming.round, counts: m.counts }
+        this.peerOk = { round: this.incoming.round, digests: m.digests }
         void this.evaluate()
         return
       case "fail":
-        this.over = true
+        this.end()
         this.events.onFail(
           m.reason
             ? `The other device stopped the sync: ${m.reason}`
@@ -160,6 +234,7 @@ export class SyncSession<Stats> {
 
   onBinary(data: Uint8Array): void {
     if (this.over) return
+    this.quietTicks = 0
     const inc = this.incoming
     if (!inc?.reassembler) {
       return this.fail("Unexpected data from the other device.", true)
@@ -216,10 +291,10 @@ export class SyncSession<Stats> {
       if (inc.reassembler || inc.merged !== parts) {
         return this.fail("The other device's data was incomplete.", true)
       }
-      const counts = await this.deps.counts()
+      const digests = await this.deps.digests()
       if (this.over) return
-      this.ourOk = { round: inc.round, counts }
-      this.io.sendText(okMessage(counts))
+      this.ourOk = { round: inc.round, digests }
+      this.io.sendText(okMessage(digests))
       void this.evaluate()
     })
     inc.chain = inc.chain.catch((error: unknown) =>
@@ -257,9 +332,10 @@ export class SyncSession<Stats> {
     this.ourOk = null
     this.peerOk = null
 
-    if (countsEqual(ours.counts, theirs.counts)) {
+    const differing = differingTables(ours.digests, theirs.digests)
+    if (differing.length === 0) {
       this.deps.setMark(this.peer, this.startedAt)
-      this.over = true
+      this.end()
       this.events.onDone(this.stats, {
         rounds: this.round,
         modes: this.modes,
@@ -267,8 +343,9 @@ export class SyncSession<Stats> {
       })
       return
     }
-    // Something was missed (a bad mark, wiped data). Both sides see the same
-    // numbers, so both repeat in full, once.
+    // Something was missed (a bad mark, a row that came by way of a third device
+    // or a restored backup, a picture that never arrived). Both sides see the
+    // same digests, so both repeat in full, once.
     if (
       this.round === 1 &&
       (this.ourMode === "delta" || inc.mode === "delta")
@@ -276,8 +353,9 @@ export class SyncSession<Stats> {
       await this.sendRound(2)
       return
     }
+    const names = differing.map((table) => DIGEST_LABELS[table]).join(", ")
     this.fail(
-      "The two devices still hold different data after a full sync. Their data is merged as far as possible; try the sync again, and restore a backup on the device that is missing data if it keeps happening.",
+      `The two devices still differ in ${names} after a full sync. Their data is merged as far as possible. If you studied or edited on either device during the sync, try again; if it keeps happening, restore a backup on the device that is missing data.`,
       true
     )
   }
@@ -319,7 +397,7 @@ export class SyncSession<Stats> {
 
   private fail(message: string, tellPeer: boolean): void {
     if (this.over) return
-    this.over = true
+    this.end()
     if (tellPeer) {
       try {
         this.io.sendText(failMessage(message))

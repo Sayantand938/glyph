@@ -13,6 +13,7 @@ import { StudySession } from "@/components/study/study-session"
 import { Button } from "@/components/ui/button"
 import { useAutoFit } from "@/hooks/use-auto-fit"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
+import { useSyncRunning } from "@/hooks/use-sync-running"
 import { formatSummary } from "@/lib/importer"
 import type { StudyOptions } from "@/lib/study-options"
 
@@ -36,6 +37,8 @@ export default function App() {
   // studying, and not during a sync (which writes thousands of reviews and would
   // restart the fit after every part).
   useAutoFit(studying !== null || syncOpen)
+  // A sync in another tab of this app: studying waits (see `useSyncRunning`).
+  const syncRunning = useSyncRunning()
 
   return (
     <div
@@ -100,6 +103,16 @@ export default function App() {
           </div>
         )}
 
+        {syncRunning && (studying || picking) && (
+          <p
+            role="status"
+            className="mt-4 rounded-lg border p-3 text-sm text-muted-foreground"
+          >
+            A sync is running in another tab. Studying is paused until it
+            finishes, so no review is written in the middle of it.
+          </p>
+        )}
+
         {syncOpen ? (
           <SyncPage onBack={() => setSyncOpen(false)} />
         ) : importOpen ? (
@@ -110,14 +123,18 @@ export default function App() {
             }
           />
         ) : studying ? (
-          <StudySession
-            scope={studying.scope}
-            options={studying.options}
-            onExit={() => setStudying(null)}
-          />
+          <div inert={syncRunning} className={syncRunning ? "opacity-50" : ""}>
+            <StudySession
+              scope={studying.scope}
+              options={studying.options}
+              locked={syncRunning}
+              onExit={() => setStudying(null)}
+            />
+          </div>
         ) : picking ? (
           <StudyOptionsPage
             scope={picking}
+            locked={syncRunning}
             onBack={() => setPicking(null)}
             onStart={(options) => {
               setStudying({ scope: picking, options })

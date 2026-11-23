@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { countRows, readBackupParts } from "@/db/backup-parts"
+import { computeDigests, readBackupParts } from "@/db/backup-parts"
 import { importBackup } from "@/db/repo"
 import {
   addMergeStats,
@@ -24,6 +24,7 @@ import {
   type LinkHandlers,
   type Offer,
 } from "@/lib/sync/rtc"
+import { keepSyncRunning } from "@/lib/sync/keep-running"
 
 export type SyncPhase =
   | { name: "idle" }
@@ -51,10 +52,19 @@ interface Attempt {
   /** Done or failed: later events are ignored. */
   over: boolean
   timer: ReturnType<typeof setTimeout> | null
+  /** Gives back the screen wake lock and the sync lock (see `keepSyncRunning`). */
+  release: (() => void) | null
 }
 
 function newAttempt(): Attempt {
-  return { link: null, offer: null, session: null, over: false, timer: null }
+  return {
+    link: null,
+    offer: null,
+    session: null,
+    over: false,
+    timer: null,
+    release: null,
+  }
 }
 
 const DEVICE_KEY = "glyph.deviceId"
@@ -112,7 +122,7 @@ function depsFor(): SyncDeps<MergeStats> {
     },
     emptyStats: emptyMergeStats,
     addStats: addMergeStats,
-    counts: countRows,
+    digests: computeDigests,
   }
 }
 
@@ -143,6 +153,7 @@ export function usePeerSync() {
     a.over = true
     a.session?.stop()
     if (a.timer) clearTimeout(a.timer)
+    a.release?.()
     a.link?.close()
   }, [])
 
@@ -154,6 +165,7 @@ export function usePeerSync() {
       if (a.over) return
       a.over = true
       if (a.timer) clearTimeout(a.timer)
+      a.release?.()
       const link = a.link
       if (link) setTimeout(() => link.close(), CLOSE_DELAY_MS)
       setPhase(next)
@@ -164,6 +176,8 @@ export function usePeerSync() {
         if (a.over) return
         a.link = link
         if (a.timer) clearTimeout(a.timer)
+        // Keep the screen on and tell other tabs a sync is running.
+        a.release = keepSyncRunning()
         setPhase({ name: "syncing", progress: null })
         const session = new SyncSession<MergeStats>(
           {
@@ -248,6 +262,7 @@ export function usePeerSync() {
       a.timer = setTimeout(() => {
         if (a.over) return
         a.over = true
+        a.release?.()
         a.link?.close()
         setPhase({
           name: "error",

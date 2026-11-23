@@ -25,10 +25,13 @@ export function StudyOptionsPage({
   scope,
   onBack,
   onStart,
+  locked = false,
 }: {
   scope: StudyScope
   onBack: () => void
   onStart: (options: StudyOptions) => void
+  /** A device sync is running (in another tab): studying waits until it ends. */
+  locked?: boolean
 }) {
   const [options, setOptions] = useStoredState(
     "glyph.studyOptions",
@@ -78,7 +81,7 @@ export function StudyOptionsPage({
       onBack={onBack}
       onSubmit={(event) => {
         event.preventDefault()
-        if (total > 0 && limit !== undefined) onStart(effective)
+        if (total > 0 && limit !== undefined && !locked) onStart(effective)
       }}
       footer={
         <>
@@ -88,11 +91,13 @@ export function StudyOptionsPage({
           <Button
             type="submit"
             autoFocus
-            disabled={total === 0 || limit === undefined}
+            disabled={total === 0 || limit === undefined || locked}
           >
             {total === 0
               ? "Nothing to study"
-              : `Start (${total} card${total === 1 ? "" : "s"})`}
+              : locked
+                ? "Sync running..."
+                : `Start (${total} card${total === 1 ? "" : "s"})`}
           </Button>
         </>
       }

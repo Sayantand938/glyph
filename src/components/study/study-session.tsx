@@ -20,10 +20,13 @@ import { useStudyRun } from "./use-study-run"
 export function StudySession({
   scope,
   options,
+  locked = false,
   onExit,
 }: {
   scope: StudyScope
   options: StudyOptions
+  /** A device sync is running: shortcuts are off until it ends. */
+  locked?: boolean
   onExit: () => void
 }) {
   const s = useStudyRun(scope, options)
@@ -52,6 +55,7 @@ export function StudySession({
   useStudyKeys({
     active:
       run !== null &&
+      !locked &&
       !editing &&
       !deleting &&
       !confirmExit &&
