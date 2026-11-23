@@ -202,9 +202,7 @@ export function FsrsOptimizer() {
           onClick={() => {
             setPhase({ kind: "idle" })
             void countReviews()
-              .then((reviews) =>
-                saveSetting("fit", { weights: null, reviews })
-              )
+              .then((reviews) => saveSetting("fit", { weights: null, reviews }))
               .catch(() => undefined)
           }}
         >
@@ -218,17 +216,16 @@ export function FsrsOptimizer() {
           className="mt-0.5 size-4 accent-primary"
           checked={autoFit}
           onChange={(e) =>
-            void saveSetting("autoFit", e.target.checked).catch(
-              () => undefined
-            )
+            void saveSetting("autoFit", e.target.checked).catch(() => undefined)
           }
         />
         <span>
           <span className="block font-medium">Re-fit automatically</span>
           <span className="block text-muted-foreground">
-            Runs by itself after every {AUTO_FIT_STEP} reviews, between study
-            sessions. The parameters and this setting sync with your questions,
-            so your devices stay in step.
+            Runs by itself between study sessions, after {AUTO_FIT_STEP} more
+            reviews at first and less often as your history grows. The
+            parameters and this setting sync with your questions, so your
+            devices stay in step.
           </span>
         </span>
       </label>

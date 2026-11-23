@@ -7,7 +7,15 @@
  * (exponential forgetting with a per-card half-life), so the scheduler is
  * tested against something it does not already assume.
  */
-import { Rating, State, emptyCardRow, grade, type Grade } from "@/db/scheduler"
+import {
+  DEFAULT_RETENTION,
+  Rating,
+  State,
+  emptyCardRow,
+  grade,
+  type Grade,
+  type Weights,
+} from "@/db/scheduler"
 import type { CardRow, RevlogRow } from "@/db/types"
 import { buildQueue, countCards } from "@/lib/queue"
 import { requeueAgain, requeueGap } from "@/lib/session"
@@ -35,6 +43,15 @@ export interface Scenario {
   /** Chance of skipping a whole day. */
   skipProbability: number
   vacation?: { startDay: number; lengthDays: number }
+  /** More than one break (same meaning as `vacation`). */
+  vacations?: { startDay: number; lengthDays: number }[]
+  /**
+   * New cards introduced per day (the study options page's "Max new cards").
+   * Applied to the day's first session; omitted = no limit, as before.
+   */
+  newPerDay?: number
+  /** ms epoch of the first day (local midnight); default 2026-01-01. */
+  startMs?: number
   /** Session start varies by up to this many hours either side of 09:00. */
   startJitterHours: number
   seed: number
@@ -147,11 +164,29 @@ function checkReview(
   }
 }
 
-/** Runs one scenario for `scenario.days` days. Deterministic for a given seed. */
-export function simulate(scenario: Scenario): SimResult {
+/** The FSRS weights the scheduler uses; a driver may change `current` between days. */
+export interface WeightsRef {
+  current: Weights | undefined
+}
+
+/** What a day-by-day driver sees after each simulated day. */
+export interface DayInfo {
+  day: number
+  /** The review log so far (live; do not modify). */
+  logs: readonly RevlogRow[]
+}
+
+/**
+ * Runs one scenario for `scenario.days` days, yielding after each day so a driver
+ * can act in between (refit the weights, say). Deterministic for a given seed.
+ */
+function* simulateSteps(
+  scenario: Scenario,
+  weights: WeightsRef
+): Generator<DayInfo, SimResult> {
   const rnd = mulberry32(scenario.seed)
   // Local midnight: the queue's "due today" rule uses the local calendar day.
-  const start = new Date(2026, 0, 1).getTime()
+  const start = scenario.startMs ?? new Date(2026, 0, 1).getTime()
 
   const rows = new Map<string, CardRow>()
   const memory = new Map<string, Memory>()
@@ -208,12 +243,18 @@ export function simulate(scenario: Scenario): SimResult {
     }))
   }
 
-  function runSession(day: number, now: number, seed: string): number {
+  function runSession(
+    day: number,
+    now: number,
+    seed: string,
+    newLimit: number | null
+  ): number {
     let queue = buildQueue({
       cards: queueCards(),
       now,
       seed,
       mixed: true,
+      newLimit,
     })
     const views = new Map<string, number>()
     let index = 0
@@ -253,10 +294,24 @@ export function simulate(scenario: Scenario): SimResult {
       })
 
       expose(mem, now, recalled, p)
-      const result = grade(row, rating, now, durationMs)
+      const result = grade(
+        row,
+        rating,
+        now,
+        durationMs,
+        DEFAULT_RETENTION,
+        weights.current
+      )
       checkReview(row, rating, result.row, now, violations)
       // Good must never schedule sooner than Again for the same card and moment.
-      const worst = grade(row, Rating.Again, now, durationMs).row
+      const worst = grade(
+        row,
+        Rating.Again,
+        now,
+        durationMs,
+        DEFAULT_RETENTION,
+        weights.current
+      ).row
       if (rating === Rating.Good && result.row.due < worst.due) {
         violations.push(`${id.slice(0, 6)}: Good due earlier than Again`)
       }
@@ -305,10 +360,10 @@ export function simulate(scenario: Scenario): SimResult {
       backlog: 0,
       states: [0, 0, 0, 0],
     }
-    const onVacation =
-      scenario.vacation !== undefined &&
-      day >= scenario.vacation.startDay &&
-      day < scenario.vacation.startDay + scenario.vacation.lengthDays
+    const onVacation = [
+      ...(scenario.vacation ? [scenario.vacation] : []),
+      ...(scenario.vacations ?? []),
+    ].some((v) => day >= v.startDay && day < v.startDay + v.lengthDays)
     const skipped = onVacation || rnd() < scenario.skipProbability
 
     if (!skipped) {
@@ -319,12 +374,19 @@ export function simulate(scenario: Scenario): SimResult {
           const counts = countCards(queueCards(), now)
           daySession.backlog = counts.learning + counts.due
         }
-        runSession(day, now, `sim:${scenario.seed}:${day}:${s}`)
+        const newLimit =
+          scenario.newPerDay === undefined
+            ? null
+            : s === 0
+              ? scenario.newPerDay
+              : 0
+        runSession(day, now, `sim:${scenario.seed}:${day}:${s}`, newLimit)
       }
     }
 
     for (const r of rows.values()) daySession.states[r.state] += 1
     days.push(daySession)
+    yield { day, logs }
   }
 
   return {
@@ -336,6 +398,35 @@ export function simulate(scenario: Scenario): SimResult {
     graduatedDay,
     learningLeftBehind,
     violations,
+  }
+}
+
+/** Runs one scenario with fixed weights (the defaults unless `weights` says otherwise). */
+export function simulate(
+  scenario: Scenario,
+  weights: WeightsRef = { current: undefined }
+): SimResult {
+  const steps = simulateSteps(scenario, weights)
+  for (;;) {
+    const next = steps.next()
+    if (next.done) return next.value
+  }
+}
+
+/**
+ * Like `simulate`, but `afterDay` runs between days and may change
+ * `weights.current`, as the automatic refit does in the app.
+ */
+export async function simulateAdaptive(
+  scenario: Scenario,
+  weights: WeightsRef,
+  afterDay: (info: DayInfo) => Promise<void>
+): Promise<SimResult> {
+  const steps = simulateSteps(scenario, weights)
+  for (;;) {
+    const next = steps.next()
+    if (next.done) return next.value
+    await afterDay(next.value)
   }
 }
 

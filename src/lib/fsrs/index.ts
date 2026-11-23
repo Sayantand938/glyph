@@ -7,7 +7,12 @@ export {
   isDefaultWeights,
   parseWeights,
 } from "./params"
-export { AUTO_FIT_STEP, shouldAutoFit } from "./auto"
+export {
+  AUTO_FIT_GROWTH,
+  AUTO_FIT_STEP,
+  autoFitStep,
+  shouldAutoFit,
+} from "./auto"
 export { DAY_ROLLOVER_HOURS, elapsedStudyDays, toStudyClock } from "./days"
 export { buildSequences, countScored, type ReviewRecord } from "./history"
 export { evaluate } from "./metrics"

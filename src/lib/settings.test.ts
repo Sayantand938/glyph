@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { AUTO_FIT_STEP, shouldAutoFit } from "./fsrs/auto"
+import { AUTO_FIT_STEP, autoFitStep, shouldAutoFit } from "./fsrs/auto"
 import { DEFAULT_WEIGHTS, MIN_SCORED_REVIEWS } from "./fsrs"
 import {
   DEFAULT_SETTINGS,
@@ -77,7 +77,9 @@ describe("readSettingRow", () => {
   })
 
   it("does not accept a key that only exists on Object.prototype", () => {
-    expect(readSettingRow({ key: "toString", value: 1, updatedAt: 1 })).toBeNull()
+    expect(
+      readSettingRow({ key: "toString", value: 1, updatedAt: 1 })
+    ).toBeNull()
   })
 })
 
@@ -118,7 +120,11 @@ describe("shouldAutoFit", () => {
 
   it("waits for enough reviews", () => {
     expect(
-      shouldAutoFit({ ...on, reviews: MIN_SCORED_REVIEWS - 1, lastFitReviews: 0 })
+      shouldAutoFit({
+        ...on,
+        reviews: MIN_SCORED_REVIEWS - 1,
+        lastFitReviews: 0,
+      })
     ).toBe(false)
     expect(
       shouldAutoFit({ ...on, reviews: MIN_SCORED_REVIEWS, lastFitReviews: 0 })
@@ -128,10 +134,33 @@ describe("shouldAutoFit", () => {
   it("refits every step after the last attempt", () => {
     const last = 500
     expect(
-      shouldAutoFit({ ...on, reviews: last + AUTO_FIT_STEP - 1, lastFitReviews: last })
+      shouldAutoFit({
+        ...on,
+        reviews: last + AUTO_FIT_STEP - 1,
+        lastFitReviews: last,
+      })
     ).toBe(false)
     expect(
-      shouldAutoFit({ ...on, reviews: last + AUTO_FIT_STEP, lastFitReviews: last })
+      shouldAutoFit({
+        ...on,
+        reviews: last + AUTO_FIT_STEP,
+        lastFitReviews: last,
+      })
+    ).toBe(true)
+  })
+
+  it("waits longer as the log grows", () => {
+    expect(autoFitStep(0)).toBe(AUTO_FIT_STEP)
+    expect(autoFitStep(1000)).toBe(AUTO_FIT_STEP)
+    expect(autoFitStep(2000)).toBe(AUTO_FIT_STEP)
+    expect(autoFitStep(2001)).toBe(201)
+    expect(autoFitStep(20000)).toBe(2000)
+    const last = 20000
+    expect(
+      shouldAutoFit({ ...on, reviews: last + 1999, lastFitReviews: last })
+    ).toBe(false)
+    expect(
+      shouldAutoFit({ ...on, reviews: last + 2000, lastFitReviews: last })
     ).toBe(true)
   })
 
