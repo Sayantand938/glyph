@@ -336,6 +336,10 @@ The data layer moved from IndexedDB (Dexie) to a SQLite file owned by the Tauri 
 - **Removed.** `src/sim/browser-run.ts` (a manual console harness against IndexedDB); the pure simulators and their tests stay. The sim could be rebuilt on `memoryBackend()` if a big-database timing run is wanted.
 - **Verified.** typecheck, lint, 553 tests, `npm run build` clean; `tauri build --no-bundle` builds and, launched fresh, the exe created `glyph.db`, migrated it to `user_version` 1 and seeded 2 decks, 3 notes, 3 cards. **Not verified:** the screens in the running app (study, browse, import, backup export/import, sync, image paste) against SQLite; a large database (50,000 questions, years of reviews) for speed; the installer bundle.
 
+### Release v0.4.0 (2026-11-23)
+
+First desktop and Android release (Tauri 2, SQLite). Windows: `npm run tauri build` gives the MSI (the NSIS bundle needs a download from GitHub that timed out on this machine). Android: `tauri android init` once (the generated `src-tauri/gen` is git-ignored), then `npx tauri android build --apk --target aarch64` with `JAVA_HOME` (Android Studio's `jbr`), `ANDROID_HOME` and `NDK_HOME` set; the APK comes out unsigned and is signed with `apksigner` using `D:\coding\tools\android-keys\glyph` (key made 2026-11-23, same convention as the other apps there; back it up, a lost key means no updates). Not verified: the app running on a phone (SQLite on Android, the screens, device sync).
+
 ### Reliability R1-R2 notes (built 2026-11-23)
 
 R0's three failing tests were written as part of R1 (they live in `src/lib/sync-session.test.ts`, "a sync that must notice what the row counts cannot": laptop to phone to tablet, restored backup then sync, picture that never arrived). The fake devices there already carried change stamps and filtered deltas like `readBackupParts`; R0's other half (get the working tree green and committed) was done afterwards: the earlier FSRS and backup work and R1-R2 went into one commit. Sync (1), (2) and (3) from the findings above are fixed; (4) and (5) are not (R6, R7).
