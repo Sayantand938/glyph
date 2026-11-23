@@ -25,9 +25,10 @@ function card(
   cardId: string,
   state: number,
   due: number,
-  topicId = "t1"
+  topicId = "t1",
+  stability = 1
 ): QueueCard {
-  return { cardId, topicId, state, due }
+  return { cardId, topicId, state, due, stability }
 }
 
 describe("state constants", () => {
@@ -162,6 +163,51 @@ describe("buildQueue", () => {
 
   it("returns an empty queue when nothing is available", () => {
     expect(buildQueue({ cards: [], now: NOW, seed: "s" })).toEqual([])
+  })
+
+  describe("due reviews by stability", () => {
+    const reviews = [
+      card("high", CARD_REVIEW, NOW - 300, "t1", 30),
+      card("low", CARD_REVIEW, NOW - 100, "t1", 0.5),
+      card("mid", CARD_REVIEW, NOW - 200, "t1", 4),
+      card("tie-b", CARD_REVIEW, NOW - 50, "t1", 4),
+    ]
+
+    it("asks the least stable first, ties by oldest due", () => {
+      const queue = buildQueue({ cards: reviews, now: NOW, seed: "s" })
+      expect(queue).toEqual(["low", "mid", "tie-b", "high"])
+    })
+
+    it("does not depend on the seed or the input order", () => {
+      const a = buildQueue({ cards: reviews, now: NOW, seed: "a" })
+      const b = buildQueue({
+        cards: [...reviews].reverse(),
+        now: NOW,
+        seed: "b",
+      })
+      expect(a).toEqual(b)
+    })
+
+    it("keeps the order in a mixed session, with new cards spread through", () => {
+      const withNew = [
+        ...reviews,
+        ...Array.from({ length: 8 }, (_, i) => card(`n${i}`, CARD_NEW, i)),
+      ]
+      const queue = buildQueue({
+        cards: withNew,
+        now: NOW,
+        seed: "mix",
+        mixed: true,
+      })
+      expect(queue.filter((id) => !id.startsWith("n"))).toEqual([
+        "low",
+        "mid",
+        "tie-b",
+        "high",
+      ])
+      expect(queue).toHaveLength(12)
+      expect(queue.slice(0, 4).some((id) => id.startsWith("n"))).toBe(true)
+    })
   })
 })
 
