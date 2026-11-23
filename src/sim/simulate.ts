@@ -204,6 +204,7 @@ export function simulate(scenario: Scenario): SimResult {
       topicId: r.topicId,
       state: r.state,
       due: r.due,
+      stability: r.stability,
     }))
   }
 

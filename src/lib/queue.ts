@@ -11,8 +11,8 @@ export const CARD_LEARNING = 1
 export const CARD_REVIEW = 2
 export const CARD_RELEARNING = 3
 
-/** The slice of a card row the queue and the counts need. */
-export interface QueueCard {
+/** The slice of a card row the counts need. */
+export interface CountCard {
   cardId: string
   topicId: string
   state: number
@@ -22,6 +22,12 @@ export interface QueueCard {
   suspended?: boolean
   /** ms epoch; a card is buried (left out) while this is still in the future. */
   buriedUntil?: number
+}
+
+/** What the queue needs: a counted card plus its FSRS stability. */
+export interface QueueCard extends CountCard {
+  /** FSRS memory stability in days: how long the memory lasts. Orders due reviews. */
+  stability: number
 }
 
 export interface DeckCounts {
@@ -57,7 +63,7 @@ export function endOfLocalDay(now: number): number {
  * Suspended and buried cards are not counted at all.
  */
 export function countCards(
-  cards: readonly QueueCard[],
+  cards: readonly CountCard[],
   now: number
 ): DeckCounts {
   const counts: DeckCounts = { new: 0, learning: 0, due: 0 }
@@ -121,12 +127,37 @@ function byDue(a: QueueCard, b: QueueCard): number {
   )
 }
 
+/** Least stable first (the weakest memories), then oldest due, then id. */
+function byStability(a: QueueCard, b: QueueCard): number {
+  return a.stability - b.stability || byDue(a, b)
+}
+
+/**
+ * Spreads `extra` through `base` at seeded random positions, keeping the
+ * relative order of both lists.
+ */
+function interleave(
+  base: readonly string[],
+  extra: readonly string[],
+  seed: string
+): string[] {
+  const mask = seededShuffle(
+    [...base.map(() => false), ...extra.map(() => true)],
+    seed
+  )
+  let b = 0
+  let e = 0
+  return mask.map((isExtra) => (isExtra ? extra[e++] : base[b++]))
+}
+
 /**
  * Builds the session as a list of cardIds, once at session start.
  * Learning/Relearning cards due now come first (most overdue first), then Review
- * cards due today, then New cards (all of them unless `newLimit` is set).
- * `include` leaves a whole group out, like Anki's custom study. Suspended and
- * buried cards are skipped.
+ * cards due today (least stable first, so the memories closest to fading are
+ * asked first), then New cards (shuffled; all of them unless `newLimit` is
+ * set). In a mixed session the new cards are spread through the reviews, which
+ * keep their stability order. `include` leaves a whole group out, like Anki's
+ * custom study. Suspended and buried cards are skipped.
  */
 export function buildQueue({
   cards,
@@ -163,15 +194,8 @@ export function buildQueue({
   const ids = (list: readonly QueueCard[]) => list.map((c) => c.cardId)
 
   const first = ids(learning.sort(byDue))
-  if (mixed) {
-    return [
-      ...first,
-      ...seededShuffle([...ids(review.sort(byDue)), ...ids(newCards)], seed),
-    ]
-  }
-  return [
-    ...first,
-    ...seededShuffle(ids(review.sort(byDue)), `${seed}:review`),
-    ...seededShuffle(ids(newCards), `${seed}:new`),
-  ]
+  const reviews = ids(review.sort(byStability))
+  const news = seededShuffle(ids(newCards), `${seed}:new`)
+  if (mixed) return [...first, ...interleave(reviews, news, seed)]
+  return [...first, ...reviews, ...news]
 }
