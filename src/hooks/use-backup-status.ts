@@ -20,7 +20,7 @@ export function readLastBackup(): number | null {
   }
 }
 
-/** Notes that a backup was just made (manual or automatic). */
+/** Notes that a backup was just made (by hand). */
 export function recordBackup(at: number): void {
   try {
     localStorage.setItem(KEY, String(at))

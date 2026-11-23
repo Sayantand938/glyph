@@ -3,6 +3,7 @@ import {
   FlagIcon,
   KeyboardIcon,
   PencilIcon,
+  Redo2Icon,
   ShuffleIcon,
   Trash2Icon,
   Undo2Icon,
@@ -25,12 +26,14 @@ export function SessionToolbar({
   counter,
   shuffle,
   canUndo,
+  canRedo,
   canEdit,
   flag,
   suspended,
   onExit,
   onToggleShuffle,
   onUndo,
+  onRedo,
   onEdit,
   onDelete,
   onFlag,
@@ -43,6 +46,7 @@ export function SessionToolbar({
   counter: string
   shuffle: boolean
   canUndo: boolean
+  canRedo: boolean
   canEdit: boolean
   /** The current card's flag (0 = none) and whether it is suspended. */
   flag: number
@@ -50,6 +54,7 @@ export function SessionToolbar({
   onExit: () => void
   onToggleShuffle: () => void
   onUndo: () => void
+  onRedo: () => void
   onEdit: () => void
   onDelete: () => void
   onFlag: (flag: number) => void
@@ -91,11 +96,21 @@ export function SessionToolbar({
         variant="ghost"
         size="icon"
         aria-label="Undo last action"
-        title="Undo (Z)"
+        title="Undo (Z or Ctrl+Z)"
         disabled={!canUndo}
         onClick={onUndo}
       >
         <Undo2Icon />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Redo"
+        title="Redo (Y or Ctrl+Y)"
+        disabled={!canRedo}
+        onClick={onRedo}
+      >
+        <Redo2Icon />
       </Button>
       <Button
         variant="ghost"

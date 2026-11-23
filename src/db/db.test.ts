@@ -8,7 +8,9 @@ import { openDatabase } from "./database"
 import { subscribeTables } from "./live"
 import {
   loadCardHistory,
+  loadBrowseItems,
   loadDashboard,
+  loadDeckInfo,
   loadImageView,
   loadStudyCards,
   loadTagNames,
@@ -16,6 +18,7 @@ import {
 } from "./queries"
 import {
   addImage,
+  addNote,
   applyReview,
   commitImport,
   createDeck,
@@ -30,7 +33,7 @@ import {
 import { db } from "./database"
 import { memoryBackend } from "./test-backend"
 import { CARDS, NOTES, getRow } from "./tables"
-import type { CardRow, Note } from "./types"
+import type { CardRow, Deck, Note } from "./types"
 
 const QUESTIONS = JSON.stringify([
   {
@@ -60,18 +63,17 @@ async function importQuestions() {
   if (!parsed.ok) throw new Error(parsed.error)
   const { valid, invalid } = validateRows(parsed.rows)
   expect(invalid).toEqual([])
-  return commitImport(
-    {
-      subject: { kind: "new", name: "Quiz" },
-      topic: { kind: "new", name: "Basics" },
-    },
-    valid,
-    0,
-    1_000
-  )
+  return commitImport({ path: ["Quiz", "Basics"] }, valid, 0, 1_000)
 }
 
 const NOW = 5_000_000_000_000
+
+const topLevelNames = (data: { children: Map<string | null, Deck[]> }) =>
+  (data.children.get(null) ?? []).map((d) => d.name)
+
+/** New cards across every deck (each card is counted once, in its own deck). */
+const totalNew = (data: { counts: Map<string, { new: number }> }) =>
+  [...data.counts.values()].reduce((sum, c) => sum + c.new, 0)
 
 beforeEach(async () => {
   await openDatabase(memoryBackend())
@@ -80,10 +82,9 @@ beforeEach(async () => {
 describe("startup", () => {
   it("creates the schema and seeds the sample deck once", async () => {
     const data = await loadDashboard(NOW)
-    expect(data.subjects.map((s) => s.name)).toEqual(["Sample Subject"])
-    const counts = [...data.counts.values()][0]
-    expect(counts.new).toBe(3)
-    expect(data.tags.map((t) => t.tag)).toEqual([
+    expect(topLevelNames(data)).toEqual(["Sample Subject"])
+    expect(totalNew(data)).toBe(3)
+    expect(await loadTagNames()).toEqual([
       "astronomy",
       "chemistry",
       "geography",
@@ -96,8 +97,8 @@ describe("import and queries", () => {
     const summary = await importQuestions()
     expect(summary.added).toBe(2)
     const data = await loadDashboard(NOW)
-    expect(data.subjects.map((s) => s.name)).toEqual(["Quiz", "Sample Subject"])
-    expect(data.tags.map((t) => t.tag)).toContain("europe")
+    expect(topLevelNames(data)).toEqual(["Quiz", "Sample Subject"])
+    expect(await loadTagNames()).toContain("europe")
     expect(await loadTagNames()).toContain("math")
 
     const tagged = await loadStudyCards({ kind: "tag", id: "geo" })
@@ -180,24 +181,34 @@ describe("notes and decks", () => {
     expect(stored?.deletedAt).toBe(NOW + 1)
   })
 
-  it("deleting a subject tombstones its topics and notes", async () => {
+  it("deleting a deck tombstones the decks inside it and their notes", async () => {
     await importQuestions()
-    const subject = (await loadDashboard(NOW)).subjects.find(
-      (s) => s.name === "Quiz"
-    )
-    expect(subject).toBeDefined()
-    await softDeleteDeck(subject!.id, NOW)
+    const quiz = (await loadDashboard(NOW)).children
+      .get(null)
+      ?.find((d) => d.name === "Quiz")
+    expect(quiz).toBeDefined()
+    await softDeleteDeck(quiz!.id, NOW)
     const data = await loadDashboard(NOW)
-    expect(data.subjects.map((s) => s.name)).toEqual(["Sample Subject"])
-    const topic = await loadStudyCards({ kind: "subject", id: subject!.id })
-    expect(topic).toEqual([])
+    expect(topLevelNames(data)).toEqual(["Sample Subject"])
+    const cards = await loadStudyCards({ kind: "deck", id: quiz!.id })
+    expect(cards).toEqual([])
   })
 
-  it("creates a topic only under a live subject", async () => {
-    const subject = await createDeck("Maths")
-    const topic = await createDeck("Algebra", subject.id)
-    await expect(createDeck("Nested", topic.id)).rejects.toThrow()
-    await expect(createDeck("Orphan", "nope")).rejects.toThrow()
+  it("creates a deck only under a live deck, and refuses a duplicate name", async () => {
+    const maths = await createDeck("Maths")
+    const algebra = await createDeck("Algebra", maths.id)
+    await expect(createDeck("Orphan", "nope")).rejects.toThrow(
+      "no longer exists"
+    )
+    await expect(createDeck("  algebra ", maths.id)).rejects.toThrow(
+      "already exists"
+    )
+    // The same name is fine at another level.
+    await expect(createDeck("Algebra", algebra.id)).resolves.toBeDefined()
+    await softDeleteDeck(maths.id, NOW)
+    await expect(createDeck("Late", algebra.id)).rejects.toThrow(
+      "no longer exists"
+    )
   })
 })
 
@@ -211,7 +222,7 @@ describe("transactions", () => {
       })
     ).rejects.toThrow("boom")
     const after = await loadDashboard(NOW)
-    expect(after.subjects).toEqual(before.subjects)
+    expect(topLevelNames(after)).toEqual(topLevelNames(before))
   })
 
   it("announces committed writes to live queries, not rolled back ones", async () => {
@@ -304,5 +315,204 @@ describe("backup round trip", () => {
       0
     )
     expect(rows).toBe(2) // the card and its review, no notes
+  })
+})
+
+describe("adding a question by hand", () => {
+  const draft = {
+    question: "Largest ocean?",
+    options: ["Atlantic", "Pacific", "Indian", "Arctic"] as [
+      string,
+      string,
+      string,
+      string,
+    ],
+    correctIndex: 1 as const,
+    extra: "",
+    tags: ["geo"],
+  }
+
+  async function topicId(): Promise<string> {
+    const data = await loadDashboard(NOW)
+    const subject = data.children.get(null)![0]
+    return data.children.get(subject.id)![0].id
+  }
+
+  it("creates the note and a fresh card, numbered after the topic's last", async () => {
+    const topic = await topicId()
+    const before = await loadTopicNotes(topic)
+    const note = await addNote(topic, draft, NOW)
+    expect(note.sl).toBe(Math.max(...before.map((n) => Number(n.sl))) + 1)
+    expect(note.deletedAt).toBeNull()
+
+    const notes = await loadTopicNotes(topic)
+    expect(notes.map((n) => n.id)).toContain(note.id)
+    const card = await db.transaction((tx) => getRow(tx, CARDS, note.id))
+    expect(card?.state).toBe(0)
+    expect(await loadTagNames()).toContain("geo")
+    expect((await loadStudyCards({ kind: "tag", id: "geo" })).length).toBe(1)
+  })
+
+  it("refuses the same question in the same deck", async () => {
+    const topic = await topicId()
+    await addNote(topic, draft, NOW)
+    await expect(
+      addNote(topic, { ...draft, question: "  largest   OCEAN?  " }, NOW + 1)
+    ).rejects.toThrow("already in this deck")
+  })
+
+  it("brings a deleted question back with its old card", async () => {
+    const topic = await topicId()
+    const note = await addNote(topic, draft, NOW)
+    const [card] = await loadStudyCards({ kind: "tag", id: "geo" })
+    await applyReview(card, Rating.Good, 1000, 0.9, undefined, NOW)
+    await deleteNote(note.id, NOW + 10)
+
+    const back = await addNote(topic, { ...draft, extra: "Pacific" }, NOW + 20)
+    expect(back.id).toBe(note.id)
+    expect(back.deletedAt).toBeNull()
+    expect(back.extra).toBe("Pacific")
+    expect(back.contentUpdatedAt).toBeGreaterThan(NOW + 10)
+    const kept = await db.transaction((tx) => getRow(tx, CARDS, note.id))
+    expect(kept?.reps).toBe(1)
+  })
+
+  it("refuses a deck that was deleted, or sits under one", async () => {
+    const topic = await topicId()
+    const data = await loadDashboard(NOW)
+    await softDeleteDeck(data.children.get(null)![0].id, NOW + 5)
+    await expect(addNote(topic, draft, NOW + 6)).rejects.toThrow(
+      "no longer exists"
+    )
+  })
+})
+
+describe("loadDeckInfo", () => {
+  it("describes a deck with its path and sub-decks, and is null once deleted", async () => {
+    const data = await loadDashboard(NOW)
+    const subject = data.children.get(null)![0]
+    const topic = data.children.get(subject.id)![0]
+
+    const s = await loadDeckInfo(subject.id)
+    expect(s?.deck.id).toBe(subject.id)
+    expect(s?.children.map((t) => t.id)).toEqual([topic.id])
+    expect(s?.descendants).toBe(1)
+    expect(s?.siblings.map((d) => d.id)).toContain(subject.id)
+
+    const t = await loadDeckInfo(topic.id)
+    expect(t?.children).toEqual([])
+    expect(t?.descendants).toBe(0)
+    expect(t?.path.map((d) => d.name)).toEqual([subject.name, topic.name])
+    expect(t?.siblings.map((d) => d.id)).toEqual([topic.id])
+
+    await softDeleteDeck(subject.id, NOW + 1)
+    expect(await loadDeckInfo(subject.id)).toBeNull()
+    expect(await loadDeckInfo(topic.id)).toBeNull() // under a deleted subject
+    expect(await loadDeckInfo("missing")).toBeNull()
+  })
+})
+
+describe("decks to any depth", () => {
+  const PATH = ["WBCS", "Mains", "2018", "Paper 4"]
+
+  async function importInto(names: string[], question: string, now = 2_000) {
+    const parsed = parseImportText(
+      JSON.stringify([
+        {
+          sl: 1,
+          questions: question,
+          op1: "a",
+          op2: "b",
+          op3: "c",
+          op4: "d",
+          answer: "A",
+        },
+      ])
+    )
+    if (!parsed.ok) throw new Error(parsed.error)
+    const { valid } = validateRows(parsed.rows)
+    return commitImport({ path: names }, valid, 0, now)
+  }
+
+  it("imports into a path of any length, creating every missing level once", async () => {
+    await importInto(PATH, "Q1")
+    await importInto(["wbcs", "MAINS", "2018", "Paper 3"], "Q2") // reuses 3 levels
+
+    const data = await loadDashboard(NOW)
+    const wbcs = data.children.get(null)!.find((d) => d.name === "WBCS")!
+    const mains = data.children.get(wbcs.id)!
+    expect(mains.map((d) => d.name)).toEqual(["Mains"])
+    const y2018 = data.children.get(mains[0].id)!
+    expect(y2018.map((d) => d.name)).toEqual(["2018"])
+    const papers = data.children.get(y2018[0].id)!
+    expect(papers.map((d) => d.name)).toEqual(["Paper 3", "Paper 4"])
+  })
+
+  it("studies and browses a deck together with everything below it", async () => {
+    await importInto(PATH, "Q1")
+    await importInto(["WBCS", "Mains", "2018", "Paper 3"], "Q2")
+    await importInto(["WBCS", "Prelims"], "Q3")
+    const data = await loadDashboard(NOW)
+    const wbcs = data.children.get(null)!.find((d) => d.name === "WBCS")!
+    const mains = data.children.get(wbcs.id)!.find((d) => d.name === "Mains")!
+
+    expect(await loadStudyCards({ kind: "deck", id: mains.id })).toHaveLength(2)
+    expect(await loadStudyCards({ kind: "deck", id: wbcs.id })).toHaveLength(3)
+
+    const items = await loadBrowseItems({ kind: "deck", id: mains.id })
+    expect(items.map((i) => i.row.deckPath).sort()).toEqual([
+      "WBCS > Mains > 2018 > Paper 3",
+      "WBCS > Mains > 2018 > Paper 4",
+    ])
+  })
+
+  it("a question can be added to a deck at any level", async () => {
+    await importInto(["WBCS", "Mains"], "Q1")
+    const data = await loadDashboard(NOW)
+    const wbcs = data.children.get(null)!.find((d) => d.name === "WBCS")!
+    const note = await addNote(
+      wbcs.id,
+      {
+        question: "Direct in WBCS?",
+        options: ["a", "b", "c", "d"],
+        correctIndex: 0,
+        extra: "",
+        tags: [],
+      },
+      NOW
+    )
+    const items = await loadBrowseItems({ kind: "deck", id: wbcs.id })
+    expect(items.find((i) => i.note.id === note.id)?.row.deckPath).toBe("WBCS")
+    expect(items).toHaveLength(2)
+  })
+
+  it("deleting a deck in the middle removes everything below it, not its parent", async () => {
+    await importInto(PATH, "Q1")
+    await importInto(["WBCS", "Prelims"], "Q2")
+    const data = await loadDashboard(NOW)
+    const wbcs = data.children.get(null)!.find((d) => d.name === "WBCS")!
+    const mains = data.children.get(wbcs.id)!.find((d) => d.name === "Mains")!
+
+    await softDeleteDeck(mains.id, NOW + 1)
+
+    const after = await loadDashboard(NOW)
+    expect(after.children.get(wbcs.id)!.map((d) => d.name)).toEqual(["Prelims"])
+    expect(await loadStudyCards({ kind: "deck", id: wbcs.id })).toHaveLength(1)
+    // The notes of the deleted decks are tombstoned with them.
+    const all = await loadBrowseItems(null)
+    expect(all.map((i) => i.note.question)).not.toContain("Q1")
+  })
+
+  it("a deck under a deleted one does not show up, even if it was not deleted itself", async () => {
+    await importInto(PATH, "Q1")
+    const data = await loadDashboard(NOW)
+    const wbcs = data.children.get(null)!.find((d) => d.name === "WBCS")!
+    // Only the top deck gets a tombstone (as a merge from another device could leave it).
+    await db.transaction((tx) =>
+      tx.execute("UPDATE decks SET deletedAt = ? WHERE id = ?", [NOW, wbcs.id])
+    )
+    const after = await loadDashboard(NOW)
+    expect(topLevelNames(after)).toEqual(["Sample Subject"])
+    expect(await loadBrowseItems(null)).toHaveLength(3)
   })
 })

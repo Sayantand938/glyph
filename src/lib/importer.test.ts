@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import type { Deck, Note } from "@/db/types"
+import type { Note } from "@/db/types"
 
 import {
   formatSummary,
   parseImportText,
   planImport,
-  resolveDeckRef,
   summarize,
   validateRows,
   type ValidRow,
@@ -395,56 +394,5 @@ describe("summarize / formatSummary", () => {
         duplicates: 1,
       })
     ).toBe("Added 1 new MCQ, merged 1 duplicate question in the file.")
-  })
-})
-
-describe("resolveDeckRef", () => {
-  const decks: Deck[] = [
-    {
-      id: "s1",
-      parentId: null,
-      name: "Physics",
-      updatedAt: 0,
-      deletedAt: null,
-    },
-    { id: "s2", parentId: null, name: "Old", updatedAt: 0, deletedAt: 5 },
-  ]
-
-  it("reuses a live deck by case-insensitive, trimmed name", () => {
-    expect(resolveDeckRef(decks, "", "  physics ")).toEqual({
-      kind: "existing",
-      id: "s1",
-    })
-  })
-
-  it("creates a new deck for an unknown name", () => {
-    expect(resolveDeckRef(decks, "", " Chemistry ")).toEqual({
-      kind: "new",
-      name: "Chemistry",
-    })
-  })
-
-  it("ignores soft-deleted decks when matching by name", () => {
-    expect(resolveDeckRef(decks, "", "old")).toEqual({
-      kind: "new",
-      name: "old",
-    })
-  })
-
-  it("prefers a typed name over the selection", () => {
-    expect(resolveDeckRef(decks, "s1", "Chemistry")).toEqual({
-      kind: "new",
-      name: "Chemistry",
-    })
-  })
-
-  it("falls back to the selection, and rejects a deleted or unknown one", () => {
-    expect(resolveDeckRef(decks, "s1", "  ")).toEqual({
-      kind: "existing",
-      id: "s1",
-    })
-    expect(resolveDeckRef(decks, "s2", "")).toBeNull()
-    expect(resolveDeckRef(decks, "nope", "")).toBeNull()
-    expect(resolveDeckRef(decks, "", "")).toBeNull()
   })
 })

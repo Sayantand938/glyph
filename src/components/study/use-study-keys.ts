@@ -17,6 +17,7 @@ export interface StudyKeyContext {
   onExitRequest: () => void
   onLeave: () => void
   onUndo: () => void
+  onRedo: () => void
   onEdit: () => void
   onPick: (slot: number) => void
   onNext: () => void
@@ -44,6 +45,16 @@ export function useStudyKeys(ctx: StudyKeyContext) {
 
     const onCard = ctx.hasCard && !ctx.empty && !ctx.finished && !ctx.gone
 
+    // Ctrl+Z undoes; Ctrl+Y and Ctrl+Shift+Z redo. Read from `code`, so it
+    // works on any layout.
+    if (event.ctrlKey && (event.code === "KeyZ" || event.code === "KeyY")) {
+      if (event.code === "KeyY" || event.shiftKey) ctx.onRedo()
+      else ctx.onUndo()
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
     // Ctrl+1 .. Ctrl+7 sets a flag. Read from `code`, so it works on any layout.
     if (event.ctrlKey) {
       const flag = event.shiftKey ? null : flagFromKeyCode(event.code)
@@ -63,6 +74,7 @@ export function useStudyKeys(ctx: StudyKeyContext) {
     let handled = true
     if (key === "escape") ctx.onExitRequest()
     else if (key === "z") ctx.onUndo()
+    else if (key === "y") ctx.onRedo()
     else if (key === "?") ctx.onHelp()
     else if (ctx.empty || ctx.finished) {
       if (confirmKey) ctx.onLeave()

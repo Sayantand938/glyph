@@ -48,7 +48,3 @@ export interface ImportSummary {
   invalid: number
   duplicates: number
 }
-
-/** A Subject or Topic target: reuse a live deck, or create one by name. */
-export type DeckRef =
-  { kind: "existing"; id: string } | { kind: "new"; name: string }

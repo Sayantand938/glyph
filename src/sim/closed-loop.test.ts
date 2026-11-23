@@ -1,10 +1,10 @@
 /**
- * Closed-loop check of the automatic refit: does adopting fitted weights change
+ * Closed-loop check of refitting (a manual fit each time the reminder is due): does adopting fitted weights change
  * what the learner experiences over two years (recall, workload) compared with
  * staying on the default weights?
  *
  * The run follows the app's own rule: after each simulated day, if
- * `shouldAutoFit` says so (300 reviews, then a step that grows with the log), the optimizer is
+ * `fitReminderDue` says so (1,000 reviews since the last fit), the optimizer is
  * run on the log so far with the current weights as the baseline, and a better
  * fit is used from then on. It is slow (minutes per learner), so it only runs
  * when SIM_CLOSED_LOOP is set; select one learner with `-t "<name>"`.
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import { State } from "@/db/scheduler"
-import { AUTO_FIT_STEP } from "@/lib/fsrs"
+import { FIT_REMINDER_STEP } from "@/lib/fsrs"
 import { noteId } from "@/lib/hash"
 import { parseImportText, validateRows } from "@/lib/importer"
 
@@ -142,10 +142,8 @@ describe.skipIf(!process.env.SIM_CLOSED_LOOP)("closed-loop refit", () => {
               )
           )
       }
-      out.push(line("auto refit (2 seeds)", averaged(adaptive)))
-      out.push(
-        `refit step: at least ${AUTO_FIT_STEP} reviews, growing with the log\n`
-      )
+      out.push(line("refit every 1k (2 seeds)", averaged(adaptive)))
+      out.push(`refit step: ${FIT_REMINDER_STEP} reviews\n`)
       if (REPORT_FILE) appendFileSync(REPORT_FILE, out.join("\n") + "\n")
     })
   }

@@ -4,12 +4,14 @@ import { SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { countReviews, loadReviewRecords } from "@/db/queries"
 import { saveSetting } from "@/db/repo"
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { useSettings } from "@/hooks/use-settings"
 import {
-  AUTO_FIT_STEP,
+  FIT_REMINDER_STEP,
   MIN_SCORED_REVIEWS,
   buildSequences,
   countScored,
+  fitReminderDue,
   optimizeWeights,
   type OptimizeResult,
   type Sequence,
@@ -66,8 +68,12 @@ function ResultNote({ result }: { result: OptimizeResult }) {
  * reviews better than the current ones.
  */
 export function FsrsOptimizer() {
-  const { fit, autoFit } = useSettings()
+  const { fit } = useSettings()
   const weights = fit.weights
+  const totalReviews = useLiveQuery(() => countReviews(), [], ["revlog"])
+  const refitDue =
+    totalReviews !== undefined &&
+    fitReminderDue({ reviews: totalReviews, lastFitReviews: fit.reviews })
   const [sequences, setSequences] = React.useState<Sequence[] | null>(null)
   const [phase, setPhase] = React.useState<Phase>({ kind: "idle" })
   const controller = React.useRef<AbortController | null>(null)
@@ -114,8 +120,8 @@ export function FsrsOptimizer() {
         onProgress: (progress) => setPhase({ kind: "running", progress }),
       })
       if (result.status === "done") {
-        // Saved even when nothing improved: the count tells the automatic refit
-        // (on this or a synced device) that this history has been fitted.
+        // Saved even when nothing improved: the count is where the "time to
+        // refit" reminder (here or on a synced device) counts from.
         await saveSetting("fit", {
           weights: result.improved ? result.weights : weights,
           reviews: records.length,
@@ -153,11 +159,29 @@ export function FsrsOptimizer() {
           guessed (one in four), which a flashcard app doesn&apos;t have to. You
           can run it yourself at any time.
         </p>
+        {refitDue && (
+          <p
+            role="status"
+            className="rounded-lg border border-primary/40 bg-primary/5 p-2 text-xs"
+          >
+            Time to refit: you have made{" "}
+            {(totalReviews - fit.reviews).toLocaleString()} reviews since the
+            last fit. Press Optimize to keep the intervals matched to how you
+            forget.
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {scored === null
             ? "Counting your reviews..."
             : `${scored} usable reviews (${MIN_SCORED_REVIEWS} needed; more is better).`}
         </p>
+        {!refitDue && (
+          <p className="text-xs text-muted-foreground">
+            It never runs by itself. A reminder shows here once{" "}
+            {FIT_REMINDER_STEP.toLocaleString()} reviews have been made since
+            the last fit.
+          </p>
+        )}
       </div>
 
       {running && (
@@ -209,26 +233,6 @@ export function FsrsOptimizer() {
           Reset to defaults
         </Button>
       </div>
-
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
-          className="mt-0.5 size-4 accent-primary"
-          checked={autoFit}
-          onChange={(e) =>
-            void saveSetting("autoFit", e.target.checked).catch(() => undefined)
-          }
-        />
-        <span>
-          <span className="block font-medium">Re-fit automatically</span>
-          <span className="block text-muted-foreground">
-            Runs by itself between study sessions, after {AUTO_FIT_STEP} more
-            reviews at first and less often as your history grows. The
-            parameters and this setting sync with your questions, so your
-            devices stay in step.
-          </span>
-        </span>
-      </label>
 
       {phase.kind === "result" && (
         <div

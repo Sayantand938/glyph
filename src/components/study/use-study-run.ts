@@ -21,6 +21,7 @@ import { buildQueue } from "@/lib/queue"
 import {
   dropCardFrom,
   optionOrder,
+  redoApplies,
   requeueAgain,
   requeueGap,
   summarizeSession,
@@ -29,7 +30,7 @@ import type { StudyOptions } from "@/lib/study-options"
 
 import type { StudyScope } from "../deck-tree"
 import { currentTime, dropFocus, errorText, parseBool } from "./helpers"
-import type { MarkUndo, Run, UndoEntry } from "./types"
+import type { MarkUndo, RedoItem, Run, UndoEntry } from "./types"
 
 /**
  * State and actions of one study session: builds the queue, follows the
@@ -65,10 +66,9 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
           cards,
           now: currentTime(),
           seed,
-          // A Subject or a tag mixes cards from several topics.
-          mixed: scope.kind !== "topic",
+          // A tag, or a deck with decks inside it, mixes cards from several decks.
+          mixed: scope.kind === "tag" || scope.mixed === true,
           include: options,
-          newLimit: options.newLimit,
         })
         shownAt.current = currentTime()
         setRun({
@@ -101,7 +101,22 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     ["notes", "cards"]
   )
   const ready = loaded && loaded.id === cardId ? loaded : null
-  const data: StudyCardView | null = ready?.view ?? null
+
+  // The card after this one is read ahead, so moving on shows it at once
+  // instead of an empty moment while it loads. It is live too (an edit shows),
+  // and used only until the current card's own read arrives.
+  const nextId =
+    run && run.index + 1 < run.queue.length ? run.queue[run.index + 1] : null
+  const preloaded = useLiveQuery(
+    async () => ({
+      id: nextId,
+      view: nextId ? await loadStudyCard(nextId) : null,
+    }),
+    [nextId],
+    ["notes", "cards"]
+  )
+  const ahead = preloaded && preloaded.id === cardId ? preloaded : null
+  const data: StudyCardView | null = ready?.view ?? ahead?.view ?? null
 
   // A card whose note was deleted meanwhile (e.g. by a backup import) is
   // offered as "unavailable" and can be skipped.
@@ -143,6 +158,19 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
       ? run.lastMark
       : null
   const canUndo = markUndo !== null || (!!lastEntry && lastEntry.undoable)
+  const redoItem = run?.redo?.at(-1) ?? null
+  const canRedo = redoApplies(
+    redoItem
+      ? redoItem.kind === "review"
+        ? { cardId: redoItem.entry.cardId, index: redoItem.entry.index }
+        : { cardId: redoItem.mark.cardId, index: redoItem.mark.index }
+      : null,
+    {
+      cardId,
+      index: run?.index ?? 0,
+      waitingForAnswer: run?.phase.kind === "question" && data !== null,
+    }
+  )
   const summary = summarizeSession(run?.history ?? [])
 
   function pick(slot: number) {
@@ -166,7 +194,8 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
   async function recordWrong(
     current: Run,
     view: StudyCardView,
-    picked: OptionIndex
+    picked: OptionIndex,
+    keepRedo: RedoItem[] = []
   ) {
     busy.current = true
     try {
@@ -192,6 +221,11 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         index: current.index,
         undoable: true,
         leech: outcome ?? undefined,
+        rating: Rating.Again,
+        picked,
+        wrongPick: true,
+        pickedAt: 0,
+        answerMs: durationMs,
       }
       noteLeech(outcome)
       // A card the leech rule suspended is not asked again this session; it
@@ -207,6 +241,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
             phase: { kind: "wrong", picked },
             history: [...r.history, entry],
             hidden: suspended ? [...r.hidden, entry.cardId] : r.hidden,
+            redo: keepRedo,
           }
       )
     } catch (error) {
@@ -216,16 +251,36 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     }
   }
 
-  async function gradeRight(rating: Grade) {
-    if (!run || !data || busy.current || run.phase.kind !== "right") return
+  async function gradeRight(
+    rating: Grade,
+    /** A redo gives the earlier pick back instead of reading it from the screen. */
+    replay?: {
+      picked: OptionIndex
+      pickedAt: number
+      answerMs: number
+      keepRedo: RedoItem[]
+    }
+  ) {
+    if (!run || !data || busy.current) return
+    const phase = run.phase
+    if (!replay && phase.kind !== "right") return
+    const picked = replay
+      ? replay.picked
+      : (phase as { picked: OptionIndex }).picked
+    const pickedAt = replay
+      ? replay.pickedAt
+      : (phase as { pickedAt: number }).pickedAt
+    const keepRedo = replay ? replay.keepRedo : []
     const current = run
     const view = data
-    const pickedAt = run.phase.pickedAt
     busy.current = true
     setMessage(null)
     setNotice(null)
     try {
       const durationMs = currentTime() - shownAt.current
+      const answerMs = replay
+        ? replay.answerMs
+        : Math.min(durationMs, Math.max(0, pickedAt - shownAt.current))
       const { log, leech: outcome } = await applyReview(
         view.card,
         rating,
@@ -233,13 +288,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         retention,
         weights ?? undefined,
         undefined,
-        {
-          correct: true,
-          answerMs: Math.min(
-            durationMs,
-            Math.max(0, pickedAt - shownAt.current)
-          ),
-        },
+        { correct: true, answerMs },
         leech ?? undefined
       )
       const failed = rating === Rating.Again
@@ -254,6 +303,11 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         index: current.index,
         undoable: true,
         leech: outcome ?? undefined,
+        rating,
+        picked,
+        wrongPick: false,
+        pickedAt,
+        answerMs,
       }
       shownAt.current = currentTime()
       noteLeech(outcome)
@@ -272,6 +326,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
           phase: { kind: "question" },
           history: [...r.history, entry],
           hidden: suspended ? [...r.hidden, entry.cardId] : r.hidden,
+          redo: keepRedo,
         }
       })
     } catch (error) {
@@ -284,9 +339,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
   /** Tells the user when a review has just made the card a leech. */
   function noteLeech(outcome: LeechOutcome | null) {
     if (outcome) {
-      setNotice(
-        leechNotice(outcome.action, outcome.lapses, outcome.taggedNote)
-      )
+      setNotice(leechNotice(outcome.action, outcome.lapses, outcome.taggedNote))
     }
   }
 
@@ -342,6 +395,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
               history,
               hidden,
               lastMark: r.lastMark,
+              redo: [...(r.redo ?? []), { kind: "review" as const, entry }],
             }
           : { ...r, history }
       })
@@ -350,6 +404,33 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
       setMessage(errorText(error, "Couldn't undo that review."))
     } finally {
       busy.current = false
+    }
+  }
+
+  /**
+   * Does again what Undo took back: the same answer (a wrong pick, or Pass/Fail
+   * on a right pick), suspend or bury, on the same card.
+   */
+  async function redo() {
+    if (!run || !data || busy.current || !canRedo || !redoItem) return
+    const rest = (run.redo ?? []).slice(0, -1)
+    setMessage(null)
+    setNotice(null)
+    dropFocus()
+    if (redoItem.kind === "mark") {
+      await hideCurrent(redoItem.mark.kind, rest)
+      return
+    }
+    const entry = redoItem.entry
+    if (entry.wrongPick) {
+      await recordWrong(run, data, entry.picked, rest)
+    } else {
+      await gradeRight(entry.rating, {
+        picked: entry.picked,
+        pickedAt: entry.pickedAt,
+        answerMs: entry.answerMs,
+        keepRedo: rest,
+      })
     }
   }
 
@@ -370,6 +451,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
             phase: mark.phase,
             history: r.history,
             hidden: r.hidden.filter((id) => id !== mark.cardId),
+            redo: [...(r.redo ?? []), { kind: "mark" as const, mark }],
           }
       )
     } catch (error) {
@@ -383,7 +465,10 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
    * Suspends or buries the current card and moves on: it and its re-queued
    * copies leave the queue. Answers already given for it stay in the history.
    */
-  async function hideCurrent(kind: "suspend" | "bury") {
+  async function hideCurrent(
+    kind: "suspend" | "bury",
+    keepRedo: RedoItem[] = []
+  ) {
     if (!run || !data || busy.current) return
     const current = run
     const view = data
@@ -397,6 +482,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
       else await buryCard(id, now, nextDayStart(now))
       const undo: MarkUndo = {
         cardId: id,
+        kind,
         previous: marksOf(view.card),
         queue: current.queue,
         index: current.index,
@@ -418,6 +504,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
             history: r.history,
             hidden: [...r.hidden, id],
             lastMark: undo,
+            redo: keepRedo,
           }
       )
     } catch (error) {
@@ -452,6 +539,12 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
           history: r.history.map((h) =>
             h.cardId === noteId ? { ...h, undoable: false } : h
           ),
+          redo: r.redo?.filter(
+            (item) =>
+              (item.kind === "review"
+                ? item.entry.cardId
+                : item.mark.cardId) !== noteId
+          ),
         }
     )
   }
@@ -472,6 +565,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
           index: r.index,
           phase: { kind: "question" },
           hidden: r.hidden,
+          redo: [],
           history: r.history
             .filter((h) => h.cardId !== noteId)
             .map((h) => ({
@@ -496,12 +590,14 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     finished,
     empty,
     canUndo,
+    canRedo,
     summary,
     pick,
     gradeRight,
     next,
     skipGone,
     undo,
+    redo,
     hideCurrent,
     flagCurrent,
     disableUndoFor,

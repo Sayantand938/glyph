@@ -6,6 +6,7 @@ import {
   dropCardFrom,
   formatDuration,
   optionOrder,
+  redoApplies,
   requeueAgain,
   requeueGap,
   summarizeSession,
@@ -175,5 +176,31 @@ describe("formatDuration", () => {
   it("is safe on bad input", () => {
     expect(formatDuration(Number.NaN)).toBe("0:00")
     expect(formatDuration(-1000)).toBe("0:00")
+  })
+})
+
+describe("redoApplies", () => {
+  const target = { cardId: "c1", index: 4 }
+  const here = { cardId: "c1", index: 4, waitingForAnswer: true }
+
+  it("applies when the screen is back at the card the undo restored", () => {
+    expect(redoApplies(target, here)).toBe(true)
+  })
+
+  it("does not apply with nothing to redo", () => {
+    expect(redoApplies(null, here)).toBe(false)
+  })
+
+  it("does not apply on another card or another position", () => {
+    expect(redoApplies(target, { ...here, cardId: "c2" })).toBe(false)
+    expect(redoApplies(target, { ...here, index: 5 })).toBe(false)
+    expect(redoApplies(target, { ...here, cardId: null })).toBe(false)
+  })
+
+  it("waits while the card is not waiting for an answer", () => {
+    // The right option was picked (nothing saved yet), or the card is loading.
+    expect(redoApplies(target, { ...here, waitingForAnswer: false })).toBe(
+      false
+    )
   })
 })

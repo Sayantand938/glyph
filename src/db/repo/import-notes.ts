@@ -1,8 +1,8 @@
+import { liveDecks } from "@/lib/deck-tree"
 import {
   deckNameKey,
   planImport,
   summarize,
-  type DeckRef,
   type ImportSummary,
   type ValidRow,
 } from "@/lib/importer"
@@ -23,57 +23,58 @@ import type { Deck, Note } from "../types"
 import { cleanName } from "./clean-name"
 
 export interface ImportTarget {
-  subject: DeckRef
-  topic: DeckRef
+  /**
+   * The deck to import into, as names from the top down ("WBCS", "Mains",
+   * "2018"). Each name reuses a live deck at that level (ignoring case and
+   * spacing) or creates it, so any depth works.
+   */
+  path: readonly string[]
 }
 
 /**
- * Finds the live deck a ref points at, or creates it. Names are re-matched
- * against the database (case-insensitive, trimmed) so a ref computed from a
- * stale UI snapshot can't create a duplicate. Runs inside the caller's
- * transaction.
+ * Walks `path` from the top, reusing live decks and creating the missing ones,
+ * and returns the deepest. Names are matched against the database (not a UI
+ * snapshot), so a stale screen can't create a duplicate. Runs inside the
+ * caller's transaction.
  */
-async function resolveOrCreateDeck(
+async function resolveOrCreatePath(
   tx: SqlRunner,
-  ref: DeckRef,
-  parentId: string | null,
+  path: readonly string[],
   now: number
 ): Promise<Deck> {
-  const live = (await allRows(tx, DECKS)).filter(
-    (d) => d.deletedAt === null && d.parentId === parentId
-  )
+  const live = liveDecks(await allRows(tx, DECKS))
+  let parentId: string | null = null
+  let deck: Deck | null = null
 
-  if (ref.kind === "existing") {
-    const deck = live.find((d) => d.id === ref.id)
-    if (!deck) {
-      throw new Error(
-        parentId === null
-          ? "The selected subject no longer exists."
-          : "The selected topic no longer exists."
-      )
+  for (const raw of path) {
+    const name = cleanName(raw)
+    const key = deckNameKey(name)
+    const found: Deck | undefined = live.find(
+      (d) => d.parentId === parentId && deckNameKey(d.name) === key
+    )
+    if (found) {
+      deck = found
+    } else {
+      deck = {
+        id: crypto.randomUUID(),
+        parentId,
+        name,
+        updatedAt: now,
+        deletedAt: null,
+      }
+      await addRows(tx, DECKS, [deck])
+      live.push(deck)
     }
-    return deck
+    parentId = deck.id
   }
 
-  const name = cleanName(ref.name)
-  const key = deckNameKey(name)
-  const match = live.find((d) => deckNameKey(d.name) === key)
-  if (match) return match
-
-  const deck: Deck = {
-    id: crypto.randomUUID(),
-    parentId,
-    name,
-    updatedAt: now,
-    deletedAt: null,
-  }
-  await addRows(tx, DECKS, [deck])
+  if (!deck) throw new Error("Choose a deck to import into.")
   return deck
 }
 
 /**
- * Commits a validated import in one transaction: creates missing Subject and
- * Topic, re-plans against the stored notes, then bulk-writes. New notes get a
+ * Commits a validated import in one transaction: creates the missing decks on
+ * the path, re-plans against the stored notes, then bulk-writes. New notes get a
  * fresh card; existing notes are updated in place and their card rows are
  * never touched (a missing card is the one exception: it is created fresh so a
  * note can't be left without one).
@@ -85,8 +86,7 @@ export async function commitImport(
   now = Date.now()
 ): Promise<ImportSummary> {
   return db.transaction(async (tx) => {
-    const subject = await resolveOrCreateDeck(tx, target.subject, null, now)
-    const topic = await resolveOrCreateDeck(tx, target.topic, subject.id, now)
+    const topic = await resolveOrCreatePath(tx, target.path, now)
 
     // Reading by id (not by topic) also finds tombstones for resurrection.
     const probe = planImport(rows, topic.id, new Map(), now)

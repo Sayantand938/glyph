@@ -18,9 +18,9 @@ import {
 import { DEFAULT_RETENTION, parseRetention } from "./retention"
 
 /**
- * The state of the automatic FSRS fit: the fitted weights (null = defaults) and
- * how many reviews the log held when a fit was last attempted. The count is what
- * stops two synced devices from refitting the same history over and over.
+ * The state of the FSRS fit: the fitted weights (null = defaults) and how many
+ * reviews the log held when a fit was last attempted. The count is what the
+ * "time to refit" reminder counts from (`fitReminderDue`), on any synced device.
  */
 export interface FitState {
   weights: number[] | null
@@ -31,7 +31,11 @@ export interface SettingValues {
   /** Desired retention, 0.7 to 0.97. */
   retention: number
   fit: FitState
-  /** Refit the weights by itself as reviews pile up. */
+  /**
+   * Unused since the fit became manual. Kept only so a backup or sync from a
+   * version that wrote this row still reads (an unknown key would reject the
+   * file).
+   */
   autoFit: boolean
   /** Lapses that make a leech; 0 = off. */
   leechThreshold: number

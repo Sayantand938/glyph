@@ -3,12 +3,11 @@
  * `commitImport()` in src/db/repo and re-runs `planImport()` inside its
  * transaction against the stored notes.
  */
-export { deckNameKey, resolveDeckRef } from "./deck-ref"
+export { deckNameKey } from "./deck-ref"
 export { parseImportText, validateRows } from "./parse"
 export { formatSummary, planImport, summarize } from "./plan"
 export {
   MAX_IMPORT_BYTES,
-  type DeckRef,
   type ImportPlan,
   type ImportSummary,
   type InvalidRow,

@@ -6,6 +6,13 @@ import type { BackupData } from "@/lib/backup"
 import { makeBrowseRow, type BrowseRow } from "@/lib/browse"
 import type { ReviewRecord } from "@/lib/fsrs"
 import { imageIdsInNotes } from "@/lib/image"
+import {
+  childrenOf,
+  deckPath,
+  liveDecks,
+  pathLabel,
+  subtreeIds,
+} from "@/lib/deck-tree"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
 import { db } from "./database"
@@ -33,53 +40,35 @@ import type {
 } from "./types"
 
 /**
- * What a study session or the browse list covers: one Subject, one Topic, or
- * every question carrying one tag (`id` is then the tag).
+ * What a study session or the browse list covers: one deck together with
+ * everything below it, or every question carrying one tag (`id` is then the tag).
  */
 export interface QueryScope {
-  kind: "subject" | "topic" | "tag"
+  kind: "deck" | "tag"
   id: string
 }
 
-export interface TagSummary {
-  tag: string
-  counts: DeckCounts
-}
-
 export interface DashboardData {
-  /** Live Subjects, sorted by name. */
-  subjects: Deck[]
-  /** Live Topics by Subject id, sorted by name. Topics of deleted Subjects are left out. */
-  topics: Map<string, Deck[]>
-  /** Counts by Topic id. */
+  /** Live decks by parent id (`null` = the top level), each list in name order. */
+  children: Map<string | null, Deck[]>
+  /** Counts of each live deck's own cards (not those of the decks below it). */
   counts: Map<string, DeckCounts>
-  /** Tags used by at least one live question, sorted by name. */
-  tags: TagSummary[]
 }
 
-function byName(a: Deck, b: Deck): number {
-  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+/** The live decks (not deleted, every ancestor live too). */
+async function liveDeckList(tx: SqlRunner): Promise<Deck[]> {
+  return liveDecks(await allRows(tx, DECKS))
 }
 
 /**
  * Everything the dashboard shows. Counts only include cards of live notes in
- * live Topics under live Subjects (a card is not tombstoned with its note).
+ * live decks (a card is not tombstoned with its note); rolling them up the tree
+ * is `rollupCounts`.
  */
 export async function loadDashboard(now: number): Promise<DashboardData> {
   return db.transaction(async (tx) => {
-    const decks = (await allRows(tx, DECKS)).filter((d) => d.deletedAt === null)
-    const subjects = decks.filter((d) => d.parentId === null).sort(byName)
-    const subjectIds = new Set(subjects.map((s) => s.id))
-
-    const topics = new Map<string, Deck[]>(subjects.map((s) => [s.id, []]))
-    for (const deck of decks) {
-      if (deck.parentId !== null && subjectIds.has(deck.parentId)) {
-        topics.get(deck.parentId)?.push(deck)
-      }
-    }
-    for (const list of topics.values()) list.sort(byName)
-
-    const topicIds = [...topics.values()].flat().map((t) => t.id)
+    const decks = await liveDeckList(tx)
+    const deckIds = decks.map((d) => d.id)
     // A card is not tombstoned with its note, so cards of deleted notes are
     // left out here.
     const cards = await queryRows(
@@ -87,85 +76,39 @@ export async function loadDashboard(now: number): Promise<DashboardData> {
       CARDS,
       `WHERE topicId ${IDS}
          AND noteId NOT IN (SELECT id FROM notes WHERE deletedAt IS NOT NULL)`,
-      [JSON.stringify(topicIds)]
+      [JSON.stringify(deckIds)]
     )
 
-    const byTopic = new Map<string, CardRow[]>()
+    const byDeck = new Map<string, CardRow[]>()
     for (const card of cards) {
-      const list = byTopic.get(card.topicId)
+      const list = byDeck.get(card.topicId)
       if (list) list.push(card)
-      else byTopic.set(card.topicId, [card])
+      else byDeck.set(card.topicId, [card])
     }
     const counts = new Map<string, DeckCounts>()
-    for (const id of topicIds) {
-      const list = byTopic.get(id)
+    for (const id of deckIds) {
+      const list = byDeck.get(id)
       counts.set(id, list ? countCards(list, now) : ZERO_COUNTS)
     }
 
-    // The cards of live notes in live Topics, by tag; tags only on deleted
-    // questions or in deleted decks have none and are left out.
-    const tagged = await tx.select(
-      `SELECT t.tag AS tag, c.*
-         FROM note_tags t
-         JOIN notes n ON n.id = t.noteId
-         JOIN cards c ON c.cardId = n.id
-        WHERE n.deletedAt IS NULL AND n.topicId ${IDS}
-        ORDER BY t.tag`,
-      [JSON.stringify(topicIds)]
-    )
-    const tags: TagSummary[] = []
-    let currentTag: string | null = null
-    let group: CardRow[] = []
-    const flush = () => {
-      if (currentTag !== null) {
-        tags.push({ tag: currentTag, counts: countCards(group, now) })
-      }
-    }
-    for (const row of tagged) {
-      const tag = String(row.tag)
-      if (tag !== currentTag) {
-        flush()
-        currentTag = tag
-        group = []
-      }
-      group.push(CARDS.fromRow(row))
-    }
-    flush()
-
-    return { subjects, topics, counts, tags }
+    return { children: childrenOf(decks), counts }
   })
 }
 
-/** Live Subjects, and live Topics under them, as ids and names. */
-async function liveDecks(tx: SqlRunner): Promise<{
-  subjects: Map<string, Deck>
-  topics: Deck[]
-}> {
-  const decks = (await allRows(tx, DECKS)).filter((d) => d.deletedAt === null)
-  const subjects = new Map(
-    decks.filter((d) => d.parentId === null).map((d) => [d.id, d])
-  )
-  const topics = decks.filter(
-    (d) => d.parentId !== null && subjects.has(d.parentId)
-  )
-  return { subjects, topics }
+/** The live decks a scope covers (all of them for a tag, which spans decks). */
+function decksInScope(decks: Deck[], scope: QueryScope | null): Deck[] {
+  if (scope === null || scope.kind === "tag") return decks
+  const covered = new Set(subtreeIds(childrenOf(decks), scope.id))
+  return decks.filter((d) => covered.has(d.id))
 }
 
-/** The live Topics a scope covers (all of them for a tag, which spans decks). */
-function topicsInScope(topics: Deck[], scope: QueryScope | null): Deck[] {
-  if (scope === null || scope.kind === "tag") return topics
-  return topics.filter((t) =>
-    scope.kind === "subject" ? t.parentId === scope.id : t.id === scope.id
-  )
-}
-
-/** The live notes of `topics`; with a tag scope only those carrying the tag. */
+/** The live notes of `decks`; with a tag scope only those carrying the tag. */
 async function liveNotesIn(
   tx: SqlRunner,
-  topics: Deck[],
+  decks: Deck[],
   scope: QueryScope | null
 ): Promise<Note[]> {
-  const ids = topics.map((t) => t.id)
+  const ids = decks.map((d) => d.id)
   const notes =
     scope?.kind === "tag"
       ? await queryRows(
@@ -177,18 +120,18 @@ async function liveNotesIn(
       : await queryRows(tx, NOTES, `WHERE topicId ${IDS}`, [
           JSON.stringify(ids),
         ])
-  const topicIds = new Set(ids)
-  return notes.filter((n) => n.deletedAt === null && topicIds.has(n.topicId))
+  const deckIds = new Set(ids)
+  return notes.filter((n) => n.deletedAt === null && deckIds.has(n.topicId))
 }
 
 /**
- * The cards a study session can draw from: cards of live notes in live Topics
- * (under live Subjects) within `scope`. Feed the result to `buildQueue`.
+ * The cards a study session can draw from: cards of live notes in live decks
+ * within `scope` (a deck and everything below it). Feed the result to `buildQueue`.
  */
 export async function loadStudyCards(scope: QueryScope): Promise<CardRow[]> {
   return db.transaction(async (tx) => {
-    const { topics } = await liveDecks(tx)
-    const notes = await liveNotesIn(tx, topicsInScope(topics, scope), scope)
+    const decks = await liveDeckList(tx)
+    const notes = await liveNotesIn(tx, decksInScope(decks, scope), scope)
     return getRows(
       tx,
       CARDS,
@@ -205,17 +148,17 @@ export interface BrowseItem {
 
 /**
  * Every live question in `scope` (all decks when null) with its progress, for
- * the browse list: live notes in live Topics under live Subjects.
+ * the browse list: live notes in live decks, each with its deck's full path.
  */
 export async function loadBrowseItems(
   scope: QueryScope | null
 ): Promise<BrowseItem[]> {
   return db.transaction(async (tx) => {
-    const { subjects, topics: allTopics } = await liveDecks(tx)
-    const topics = topicsInScope(allTopics, scope)
-    const topicById = new Map(topics.map((t) => [t.id, t]))
+    const live = await liveDeckList(tx)
+    const decks = decksInScope(live, scope)
+    const deckById = new Map(decks.map((d) => [d.id, d]))
 
-    const notes = await liveNotesIn(tx, topics, scope)
+    const notes = await liveNotesIn(tx, decks, scope)
     const cardById = new Map(
       (
         await getRows(
@@ -226,19 +169,25 @@ export async function loadBrowseItems(
       ).map((card) => [card.cardId, card])
     )
 
-    return notes.map((note) => {
-      const topic = topicById.get(note.topicId)
-      const subject = topic?.parentId ? subjects.get(topic.parentId) : undefined
-      return {
-        note,
-        row: makeBrowseRow(
-          note,
-          cardById.get(note.id),
-          topic?.name ?? "",
-          subject?.name ?? ""
-        ),
+    const labels = new Map<string, string>()
+    const label = (id: string): string => {
+      let found = labels.get(id)
+      if (found === undefined) {
+        found = pathLabel(deckPath(live, id))
+        labels.set(id, found)
       }
-    })
+      return found
+    }
+
+    return notes.map((note) => ({
+      note,
+      row: makeBrowseRow(
+        note,
+        cardById.get(note.id),
+        deckById.get(note.topicId)?.name ?? "",
+        label(note.topicId)
+      ),
+    }))
   })
 }
 
@@ -342,7 +291,7 @@ export async function countChangesSince(since: number | null): Promise<number> {
   return reviews + edited + deleted
 }
 
-/** How many reviews the log holds; the automatic refit paces itself by this. */
+/** How many reviews the log holds; the "time to refit" reminder counts from this. */
 export async function countReviews(): Promise<number> {
   return count("SELECT COUNT(*) AS n FROM revlog")
 }
@@ -369,6 +318,34 @@ export async function loadTagNames(): Promise<string[]> {
     "SELECT DISTINCT tag FROM note_tags ORDER BY tag"
   )
   return rows.map((row) => String(row.tag))
+}
+
+/** What a deck's own screen needs. */
+export interface DeckInfo {
+  deck: Deck
+  /** The decks from the top one down to `deck` (itself last). */
+  path: Deck[]
+  /** Live decks with the same parent, `deck` included (to catch duplicate names). */
+  siblings: Deck[]
+  /** Its live sub-decks, in name order. */
+  children: Deck[]
+  /** How many live decks are below it, at any depth. */
+  descendants: number
+}
+
+/** The live deck `id`, or null when it is gone (deleted, or under a deleted deck). */
+export async function loadDeckInfo(id: string): Promise<DeckInfo | null> {
+  const live = liveDecks(await loadDecks())
+  const deck = live.find((d) => d.id === id)
+  if (!deck) return null
+  const children = childrenOf(live)
+  return {
+    deck,
+    path: deckPath(live, id),
+    siblings: children.get(deck.parentId) ?? [],
+    children: children.get(id) ?? [],
+    descendants: subtreeIds(children, id).length - 1,
+  }
 }
 
 /** Every deck, tombstones included (the import page filters them itself). */

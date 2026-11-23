@@ -4,11 +4,11 @@ import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadStudyCards } from "@/db/queries"
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
+import { LoadingBlock } from "@/components/ui/spinner"
 import { useStoredState } from "@/hooks/use-stored-state"
 import { countCards } from "@/lib/queue"
 import {
   DEFAULT_STUDY_OPTIONS,
-  parseNewLimit,
   parseStudyOptions,
   sessionSize,
   type StudyOptions,
@@ -19,28 +19,30 @@ import { currentTime } from "./helpers"
 
 /**
  * Shown before a session: pick which groups of card to study (due, learning,
- * new) and cap the new cards. The choice is remembered on this device.
+ * new). The choice is remembered on this device.
  */
 export function StudyOptionsPage({
   scope,
   onBack,
   onStart,
   locked = false,
+  description = "Choose what to include in this session.",
+  children,
 }: {
   scope: StudyScope
   onBack: () => void
   onStart: (options: StudyOptions) => void
   /** A device sync is running (in another tab): studying waits until it ends. */
   locked?: boolean
+  /** The line under the title. */
+  description?: string
+  /** Shown under the options (the deck screen puts its actions here). */
+  children?: React.ReactNode
 }) {
   const [options, setOptions] = useStoredState(
     "glyph.studyOptions",
     DEFAULT_STUDY_OPTIONS,
     parseStudyOptions
-  )
-  // The limit box is text so it can be empty (= no limit) or half typed.
-  const [limitText, setLimitText] = React.useState(
-    options.newLimit === null ? "" : String(options.newLimit)
   )
   const cards = useLiveQuery(
     () => loadStudyCards(scope),
@@ -48,55 +50,30 @@ export function StudyOptionsPage({
     ["decks", "notes", "cards"]
   )
 
-  if (!cards) {
-    return (
-      <p className="py-8 text-sm text-muted-foreground" role="status">
-        Loading...
-      </p>
-    )
-  }
+  if (!cards) return <LoadingBlock label="Loading" />
 
   const counts = countCards(cards, currentTime())
-  const limit = parseNewLimit(limitText)
-  const effective: StudyOptions = {
-    ...options,
-    newLimit: limit === undefined ? options.newLimit : limit,
-  }
-  const total = sessionSize(counts, effective)
-  const newShown = Math.min(
-    counts.new,
-    effective.newLimit === null ? counts.new : effective.newLimit
-  )
+  const total = sessionSize(counts, options)
 
   function toggle(key: "due" | "learning" | "new") {
     setOptions({ ...options, [key]: !options[key] })
   }
 
-  function changeLimit(text: string) {
-    setLimitText(text)
-    const parsed = parseNewLimit(text)
-    if (parsed !== undefined) setOptions({ ...options, newLimit: parsed })
-  }
-
   return (
     <PageShell
-      title={`Study ${scope.name}`}
-      description="Choose what to include in this session."
+      title={scope.name}
+      description={description}
       onBack={onBack}
       onSubmit={(event) => {
         event.preventDefault()
-        if (total > 0 && limit !== undefined && !locked) onStart(effective)
+        if (total > 0 && !locked) onStart(options)
       }}
       footer={
         <>
           <Button type="button" variant="outline" onClick={onBack}>
             Back
           </Button>
-          <Button
-            type="submit"
-            autoFocus
-            disabled={total === 0 || limit === undefined || locked}
-          >
+          <Button type="submit" autoFocus disabled={total === 0 || locked}>
             {total === 0
               ? "Nothing to study"
               : locked
@@ -121,48 +98,20 @@ export function StudyOptionsPage({
           checked={options.learning}
           onChange={() => toggle("learning")}
         />
-        <div className="flex flex-col gap-3 p-3">
-          <GroupRow
-            bare
-            label="New"
-            hint="Questions you have never answered."
-            count={options.new ? newShown : counts.new}
-            countSuffix={
-              options.new && newShown < counts.new ? ` of ${counts.new}` : ""
-            }
-            checked={options.new}
-            onChange={() => toggle("new")}
-          />
-          <label
-            className={`flex items-center justify-between gap-3 pl-7 text-sm ${
-              options.new ? "" : "opacity-50"
-            }`}
-          >
-            <span>Max new cards</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={limitText}
-              disabled={!options.new}
-              placeholder="No limit"
-              aria-label="Maximum new cards"
-              aria-invalid={limit === undefined}
-              onChange={(event) => changeLimit(event.target.value)}
-              className="h-8 w-24 rounded-lg border bg-background px-2 text-right tabular-nums outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive"
-            />
-          </label>
-          {limit === undefined && (
-            <p role="alert" className="pl-7 text-xs text-destructive">
-              Enter a whole number, or leave it empty for no limit.
-            </p>
-          )}
-        </div>
+        <GroupRow
+          label="New"
+          hint="Questions you have never answered."
+          count={counts.new}
+          checked={options.new}
+          onChange={() => toggle("new")}
+        />
       </div>
 
       <p className="text-xs text-muted-foreground">
-        New cards are taken oldest first, so the rest follow on later days.
         Cards you leave out are not lost; they stay due until you study them.
       </p>
+
+      {children}
     </PageShell>
   )
 }
@@ -171,24 +120,17 @@ function GroupRow({
   label,
   hint,
   count,
-  countSuffix = "",
   checked,
   onChange,
-  bare = false,
 }: {
   label: string
   hint: string
   count: number
-  countSuffix?: string
   checked: boolean
   onChange: () => void
-  /** No padding or border of its own (the caller supplies them). */
-  bare?: boolean
 }) {
   return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 ${bare ? "" : "p-3"}`}
-    >
+    <label className="flex cursor-pointer items-start gap-3 p-3">
       <input
         type="checkbox"
         checked={checked}
@@ -199,10 +141,7 @@ function GroupRow({
         <span className="font-medium">{label}</span>
         <span className="text-xs text-muted-foreground">{hint}</span>
       </span>
-      <span className="font-semibold tabular-nums">
-        {count}
-        <span className="font-normal text-muted-foreground">{countSuffix}</span>
-      </span>
+      <span className="font-semibold tabular-nums">{count}</span>
     </label>
   )
 }

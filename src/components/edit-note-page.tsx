@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { NoteImage } from "@/components/note-image"
 import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadTagNames } from "@/db/queries"
-import { pruneImages, saveNote } from "@/db/repo"
+import { addNote, pruneImages, saveNote } from "@/db/repo"
 import type { Note } from "@/db/types"
 import { useImagePaste } from "@/hooks/use-image-paste"
 import type { OptionIndex } from "@/lib/answer"
@@ -54,20 +54,42 @@ function noteToDraft(note: Note): NoteDraft {
   }
 }
 
-/** Full-page editor for one question; closes itself through `onClose`. */
+const BLANK_DRAFT: NoteDraft = {
+  question: "",
+  options: ["", "", "", ""],
+  correctIndex: 0,
+  extra: "",
+  tags: [],
+}
+
+/** Where a new question goes: the deck it is added to. */
+export interface NewQuestionTarget {
+  topicId: string
+}
+
+/**
+ * Full-page editor for one question; closes itself through `onClose`. With
+ * `create` instead of `note` it is the same form for a new question.
+ */
 export function EditNotePage({
   note,
+  create,
   onClose,
   onSaved,
 }: {
-  note: Note
+  note?: Note
+  create?: NewQuestionTarget
   onClose: () => void
   onSaved?: (note: Note, resetFsrs: boolean) => void
 }) {
   const id = React.useId()
+  const creating = !note
+  const topicId = create?.topicId ?? ""
   // The form works on its own copy, so a live update of the note underneath
   // never overwrites what is being typed.
-  const [original] = React.useState(() => noteToDraft(note))
+  const [original] = React.useState(() =>
+    note ? noteToDraft(note) : BLANK_DRAFT
+  )
   const [draft, setDraft] = React.useState<NoteDraft>(original)
   // What is typed in the Tags field; `draft.tags` is its parsed form.
   const [tagsText, setTagsText] = React.useState(() =>
@@ -78,7 +100,19 @@ export function EditNotePage({
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const { valid, errors } = validateDraft(draft)
+  const { valid, errors: allErrors } = validateDraft(draft)
+  // A new question starts empty, so its "cannot be empty" messages wait until
+  // the person has been in that field. Saving stays disabled meanwhile.
+  const [touched, setTouched] = React.useState<ReadonlySet<string>>(new Set())
+  const touch = (key: string) =>
+    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+  const errors: typeof allErrors = {
+    question: creating && !touched.has("q") ? null : allErrors.question,
+    options: allErrors.options.map((message, i) =>
+      creating && !touched.has(`o${i}`) ? null : message
+    ) as typeof allErrors.options,
+    tags: allErrors.tags,
+  }
   const changed = draftChangesNote(original, draft)
   const { paste, pending: pendingImages, pasted } = useImagePaste(setError)
 
@@ -123,7 +157,9 @@ export function EditNotePage({
     setBusy(true)
     try {
       const clean = cleanDraft(draft)
-      const saved = await saveNote({ ...note, ...clean }, { resetFsrs })
+      const saved = note
+        ? await saveNote({ ...note, ...clean }, { resetFsrs })
+        : await addNote(topicId, clean)
       onSaved?.(saved, resetFsrs)
       onClose()
     } catch (e) {
@@ -134,8 +170,12 @@ export function EditNotePage({
 
   return (
     <PageShell
-      title="Edit question"
-      description="Changes show up straight away. Study progress is kept unless you reset it below. Paste a screenshot into any field to add an image."
+      title={creating ? "Add question" : "Edit question"}
+      description={
+        creating
+          ? "It starts as a new card. Paste a screenshot into any field to add an image."
+          : "Changes show up straight away. Study progress is kept unless you reset it below. Paste a screenshot into any field to add an image."
+      }
       onBack={onClose}
       backDisabled={busy}
       onSubmit={(e) => void save(e)}
@@ -149,8 +189,16 @@ export function EditNotePage({
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !valid || pendingImages > 0}>
-            {busy ? "Saving..." : "Save"}
+          <Button
+            type="submit"
+            disabled={
+              busy ||
+              !valid ||
+              pendingImages > 0 ||
+              (creating && (!changed || topicId === ""))
+            }
+          >
+            {busy ? "Saving..." : creating ? "Add" : "Save"}
           </Button>
         </>
       }
@@ -165,6 +213,7 @@ export function EditNotePage({
           className={fieldClass}
           value={draft.question}
           aria-invalid={errors.question !== null}
+          onBlur={() => touch("q")}
           onChange={(e) => {
             setDraft((d) => ({ ...d, question: e.target.value }))
             setError(null)
@@ -209,6 +258,7 @@ export function EditNotePage({
                 value={draft.options[i]}
                 aria-label={`Option ${LABELS[i]}`}
                 aria-invalid={errors.options[i] !== null}
+                onBlur={() => touch(`o${i}`)}
                 onChange={(e) => {
                   const value = e.target.value
                   setOption(i, () => value)
@@ -294,20 +344,22 @@ export function EditNotePage({
         )}
       </div>
 
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
-          className="mt-0.5 size-4 shrink-0 accent-foreground"
-          checked={resetFsrs}
-          onChange={(e) => setResetFsrs(e.target.checked)}
-        />
-        <span>
-          Reset FSRS progress
-          <span className="block text-muted-foreground">
-            Makes this a new card again. Review history is kept.
+      {!creating && (
+        <label className="flex items-start gap-2 text-xs">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 shrink-0 accent-foreground"
+            checked={resetFsrs}
+            onChange={(e) => setResetFsrs(e.target.checked)}
+          />
+          <span>
+            Reset FSRS progress
+            <span className="block text-muted-foreground">
+              Makes this a new card again. Review history is kept.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
 
       {pendingImages > 0 && (
         <p role="status" className="text-xs text-muted-foreground">

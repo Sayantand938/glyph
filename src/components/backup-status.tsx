@@ -1,7 +1,6 @@
-import { FolderIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
+import { ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import type { AutoBackup } from "@/hooks/use-auto-backup"
 import type { BackupStatus } from "@/hooks/use-backup-status"
 
 function plural(n: number, word: string): string {
@@ -33,38 +32,17 @@ export function BackupStatusLine({ status }: { status: BackupStatus }) {
   )
 }
 
-/**
- * Shown on the dashboard when a backup is due (or when an automatic backup is
- * waiting for a click); nothing otherwise.
- */
+/** Shown on the dashboard when a backup is due; nothing otherwise. */
 export function BackupReminder({
   status,
-  auto,
   busy,
   onExport,
 }: {
   status: BackupStatus
-  auto: AutoBackup
   busy: boolean
   onExport: () => void
 }) {
-  if (auto.needsPermission) {
-    return (
-      <div
-        role="status"
-        className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm"
-      >
-        <p className="flex items-center gap-2">
-          <FolderIcon className="size-4 shrink-0" aria-hidden />
-          Automatic backup to &quot;{auto.folder}&quot; needs your OK again.
-        </p>
-        <Button size="sm" onClick={() => void auto.allow()}>
-          Allow
-        </Button>
-      </div>
-    )
-  }
-  if (!status.due || auto.folder !== null) return null
+  if (!status.due) return null
   return (
     <div
       role="status"

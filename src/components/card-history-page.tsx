@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadCardHistory } from "@/db/queries"
 import { formatInterval } from "@/db/scheduler"
+import { LoadingBlock } from "@/components/ui/spinner"
 import type { Note, RevlogRow } from "@/db/types"
 import { previewText, stateLabel } from "@/lib/browse"
 import { summarizeHistory } from "@/lib/card-history"
@@ -83,9 +84,13 @@ export function CardHistoryPage({
       </blockquote>
 
       {!history || !card ? (
-        <p className="text-sm text-muted-foreground">
-          {view ? "This question has no card yet." : "Loading..."}
-        </p>
+        view ? (
+          <p className="text-sm text-muted-foreground">
+            This question has no card yet.
+          </p>
+        ) : (
+          <LoadingBlock label="Loading history" />
+        )
       ) : (
         <>
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">

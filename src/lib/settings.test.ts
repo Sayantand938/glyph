@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { AUTO_FIT_STEP, autoFitStep, shouldAutoFit } from "./fsrs/auto"
+import { FIT_REMINDER_STEP, fitReminderDue } from "./fsrs/auto"
 import { DEFAULT_WEIGHTS, MIN_SCORED_REVIEWS } from "./fsrs"
 import {
   DEFAULT_SETTINGS,
@@ -115,61 +115,42 @@ describe("mergeSettings", () => {
   })
 })
 
-describe("shouldAutoFit", () => {
-  const on = { enabled: true }
-
-  it("waits for enough reviews", () => {
+describe("fitReminderDue", () => {
+  it("is not due before the first thousand reviews", () => {
+    expect(fitReminderDue({ reviews: 0, lastFitReviews: 0 })).toBe(false)
     expect(
-      shouldAutoFit({
-        ...on,
-        reviews: MIN_SCORED_REVIEWS - 1,
-        lastFitReviews: 0,
-      })
+      fitReminderDue({ reviews: FIT_REMINDER_STEP - 1, lastFitReviews: 0 })
     ).toBe(false)
     expect(
-      shouldAutoFit({ ...on, reviews: MIN_SCORED_REVIEWS, lastFitReviews: 0 })
+      fitReminderDue({ reviews: FIT_REMINDER_STEP, lastFitReviews: 0 })
     ).toBe(true)
   })
 
-  it("refits every step after the last attempt", () => {
-    const last = 500
+  it("is due again a thousand reviews after the last attempt", () => {
+    const last = 2500
     expect(
-      shouldAutoFit({
-        ...on,
-        reviews: last + AUTO_FIT_STEP - 1,
+      fitReminderDue({
+        reviews: last + FIT_REMINDER_STEP - 1,
         lastFitReviews: last,
       })
     ).toBe(false)
     expect(
-      shouldAutoFit({
-        ...on,
-        reviews: last + AUTO_FIT_STEP,
+      fitReminderDue({
+        reviews: last + FIT_REMINDER_STEP,
         lastFitReviews: last,
       })
     ).toBe(true)
   })
 
-  it("waits longer as the log grows", () => {
-    expect(autoFitStep(0)).toBe(AUTO_FIT_STEP)
-    expect(autoFitStep(1000)).toBe(AUTO_FIT_STEP)
-    expect(autoFitStep(2000)).toBe(AUTO_FIT_STEP)
-    expect(autoFitStep(2001)).toBe(201)
-    expect(autoFitStep(20000)).toBe(2000)
-    const last = 20000
-    expect(
-      shouldAutoFit({ ...on, reviews: last + 1999, lastFitReviews: last })
-    ).toBe(false)
-    expect(
-      shouldAutoFit({ ...on, reviews: last + 2000, lastFitReviews: last })
-    ).toBe(true)
-  })
-
-  it("does nothing when switched off or after the log shrank", () => {
-    expect(
-      shouldAutoFit({ enabled: false, reviews: 5000, lastFitReviews: 0 })
-    ).toBe(false)
-    expect(shouldAutoFit({ ...on, reviews: 400, lastFitReviews: 900 })).toBe(
-      false
+  it("stays the same step however long the log is", () => {
+    expect(FIT_REMINDER_STEP).toBe(1000)
+    expect(fitReminderDue({ reviews: 51_000, lastFitReviews: 50_000 })).toBe(
+      true
     )
+  })
+
+  it("is not due after the log shrank, and never before enough reviews to fit", () => {
+    expect(fitReminderDue({ reviews: 400, lastFitReviews: 900 })).toBe(false)
+    expect(MIN_SCORED_REVIEWS).toBeLessThanOrEqual(FIT_REMINDER_STEP)
   })
 })

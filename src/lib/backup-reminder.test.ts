@@ -4,9 +4,6 @@ import {
   FIRST_BACKUP_MIN_CHANGES,
   REMIND_AFTER_CHANGES,
   REMIND_AFTER_DAYS,
-  autoBackupDue,
-  autoBackupName,
-  autoBackupsToDelete,
   backupDue,
   describeBackupAge,
   parseLastBackup,
@@ -71,46 +68,6 @@ describe("describeBackupAge", () => {
     expect(describeBackupAge(lateLastNight, NOW)).toBe("yesterday")
     expect(describeBackupAge(NOW - 5 * DAY, NOW)).toBe("5 days ago")
     expect(describeBackupAge(NOW + 90 * DAY, NOW)).toBe("never")
-  })
-})
-
-describe("autoBackupDue", () => {
-  it("runs once per local day, and only when something changed", () => {
-    const yesterday = new Date(2026, 5, 14, 23, 59).getTime()
-    expect(autoBackupDue(null, 1, NOW)).toBe(true)
-    expect(autoBackupDue(yesterday, 1, NOW)).toBe(true)
-    expect(autoBackupDue(yesterday, 0, NOW)).toBe(false)
-    expect(autoBackupDue(NOW - 3_600_000, 50, NOW)).toBe(false)
-    // A clock set back makes the stored time useless: back up.
-    expect(autoBackupDue(NOW + 30 * DAY, 1, NOW)).toBe(true)
-  })
-})
-
-describe("automatic backup files", () => {
-  it("names one file per local day", () => {
-    expect(autoBackupName(new Date(2026, 0, 5, 23, 59).getTime(), true)).toBe(
-      "glyph-auto-2026-01-05.glyph"
-    )
-    expect(autoBackupName(NOW, false)).toBe("glyph-auto-2026-06-15.jsonl")
-  })
-
-  it("deletes the oldest beyond the number to keep, and only our own files", () => {
-    const names = [
-      "glyph-auto-2026-06-10.glyph",
-      "glyph-auto-2026-06-14.glyph",
-      "glyph-auto-2026-06-12.glyph",
-      "glyph-auto-2026-06-15.glyph",
-      "holiday.jpg",
-      "glyph-backup-2026-01-01.glyph",
-      "glyph-auto-notes.txt",
-    ]
-    expect(autoBackupsToDelete(names, 2)).toEqual([
-      "glyph-auto-2026-06-12.glyph",
-      "glyph-auto-2026-06-10.glyph",
-    ])
-    expect(autoBackupsToDelete(names, 10)).toEqual([])
-    expect(autoBackupsToDelete(names, 0)).toHaveLength(4)
-    expect(autoBackupsToDelete([], 7)).toEqual([])
   })
 })
 

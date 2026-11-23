@@ -9,11 +9,9 @@ import { ImportPage } from "@/components/import/import-page"
 import { ImportReviewPage } from "@/components/import-review-page"
 import { SettingsPage } from "@/components/settings-page"
 import { SyncPage } from "@/components/sync/sync-page"
-import { StudyOptionsPage } from "@/components/study/study-options-page"
+import { DeckPage } from "@/components/deck-page"
 import { StudySession } from "@/components/study/study-session"
 import { Button } from "@/components/ui/button"
-import { useAutoBackup } from "@/hooks/use-auto-backup"
-import { useAutoFit } from "@/hooks/use-auto-fit"
 import { useBackupStatus } from "@/hooks/use-backup-status"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { useSyncRunning } from "@/hooks/use-sync-running"
@@ -25,7 +23,7 @@ export default function App() {
   const [syncOpen, setSyncOpen] = React.useState(false)
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
-  // Study is two steps: pick what to include, then the session itself.
+  // A clicked deck opens its screen (study options and actions), then the session.
   const [picking, setPicking] = React.useState<StudyScope | null>(null)
   const [studying, setStudying] = React.useState<{
     scope: StudyScope
@@ -36,15 +34,9 @@ export default function App() {
     scope: StudyScope | null
   } | null>(null)
   const backup = useBackupControls(setNotice)
-  // Refit the FSRS weights between study sessions as reviews pile up. Not while
-  // studying, and not during a sync (which writes thousands of reviews and would
-  // restart the fit after every part).
-  useAutoFit(studying !== null || syncOpen)
   // A sync in another tab of this app: studying waits (see `useSyncRunning`).
   const syncRunning = useSyncRunning()
-  // Backups: a reminder when one is due, and the optional automatic folder copy
-  // (not while studying or syncing).
-  const auto = useAutoBackup(studying !== null || syncOpen || syncRunning)
+  // Backups are manual; the dashboard only reminds when one is due.
   const backupStatus = useBackupStatus(backup.busy)
 
   return (
@@ -119,7 +111,6 @@ export default function App() {
           !settingsOpen && (
             <BackupReminder
               status={backupStatus}
-              auto={auto}
               busy={backup.busy}
               onExport={() => void backup.exportFile()}
             />
@@ -160,13 +151,18 @@ export default function App() {
             />
           </div>
         ) : picking ? (
-          <StudyOptionsPage
+          <DeckPage
             scope={picking}
             locked={syncRunning}
             onBack={() => setPicking(null)}
-            onStart={(options) => {
-              setStudying({ scope: picking, options })
+            onStart={(scope, options) => {
+              setStudying({ scope, options })
               setPicking(null)
+            }}
+            onBrowse={(scope) => {
+              setNotice(null)
+              setPicking(null)
+              setBrowsing({ scope })
             }}
           />
         ) : browsing ? (
@@ -175,7 +171,6 @@ export default function App() {
           <SettingsPage
             busy={backup.busy}
             status={backupStatus}
-            auto={auto}
             snapshots={backup.snapshots}
             onRestore={backup.startRestore}
             onRemoveSnapshot={(meta) => void backup.removeSnapshot(meta)}
@@ -194,13 +189,9 @@ export default function App() {
           <Dashboard
             onImportJson={() => setImportOpen(true)}
             onImportBackup={backup.chooseFile}
-            onStudy={(scope) => {
+            onOpen={(scope) => {
               setNotice(null)
               setPicking(scope)
-            }}
-            onBrowse={(scope) => {
-              setNotice(null)
-              setBrowsing({ scope })
             }}
           />
         )}

@@ -1,11 +1,11 @@
 /**
  * Runs a simulation the way the app lives: after each simulated day the
- * automatic refit rule (`shouldAutoFit`) is applied, the optimizer is run on the
+ * refit reminder rule (`fitReminderDue`: a manual fit every 1,000 reviews) is applied, the optimizer is run on the
  * log so far with the current weights as the baseline, and a better fit is used
  * for every later review. Shared by the closed-loop and big-deck simulations.
  */
 import { buildSequences, optimizeWeights } from "@/lib/fsrs"
-import { shouldAutoFit } from "@/lib/fsrs/auto"
+import { fitReminderDue } from "@/lib/fsrs/auto"
 
 import {
   simulateAdaptive,
@@ -41,11 +41,7 @@ export async function runAdaptive(scenario: Scenario): Promise<AdaptiveRun> {
     scenario,
     weights,
     async ({ day, logs }) => {
-      if (
-        !shouldAutoFit({ enabled: true, reviews: logs.length, lastFitReviews })
-      ) {
-        return
-      }
+      if (!fitReminderDue({ reviews: logs.length, lastFitReviews })) return
       lastFitReviews = logs.length
       const records = logs.map(({ cardId, reviewedAt, rating, state }) => ({
         cardId,

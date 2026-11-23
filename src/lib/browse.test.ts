@@ -52,7 +52,12 @@ function row(
   over: Partial<BrowseNote> = {},
   progress: Partial<BrowseCard> = {}
 ): BrowseRow {
-  return makeBrowseRow(note(over), card(progress), "Mechanics", "Physics")
+  return makeBrowseRow(
+    note(over),
+    card(progress),
+    "Mechanics",
+    "Physics > Mechanics"
+  )
 }
 
 describe("previewText", () => {
@@ -84,8 +89,8 @@ describe("makeBrowseRow", () => {
     const r = row({}, { lapses: 2, reps: 7, difficulty: 6.5 })
     expect(r).toMatchObject({
       id: "n1",
-      topicName: "Mechanics",
-      subjectName: "Physics",
+      deckName: "Mechanics",
+      deckPath: "Physics > Mechanics",
       lapses: 2,
       reps: 7,
       difficulty: 6.5,
@@ -369,11 +374,11 @@ describe("sortRows", () => {
     ])
 
     const decks = [
-      { ...row({ id: "a", sl: 1 }), subjectName: "Math", topicName: "Algebra" },
-      { ...row({ id: "b", sl: 2 }), subjectName: "Art", topicName: "Zebra" },
-      { ...row({ id: "c", sl: 3 }), subjectName: "Art", topicName: "Apple" },
+      { ...row({ id: "a", sl: 1 }), deckPath: "Math > Algebra" },
+      { ...row({ id: "b", sl: 2 }), deckPath: "Art > Zebra" },
+      { ...row({ id: "c", sl: 3 }), deckPath: "Art > Apple" },
     ]
-    expect(sortRows(decks, "topic", "asc").map((r) => r.id)).toEqual([
+    expect(sortRows(decks, "deck", "asc").map((r) => r.id)).toEqual([
       "c",
       "b",
       "a",
@@ -385,7 +390,7 @@ describe("sortRows", () => {
     sortRows(rows, "number", "asc")
     expect(rows.map((r) => r.id)).toEqual(["a", "b"])
     expect(defaultDirection("reps")).toBe("desc")
-    expect(defaultDirection("topic")).toBe("asc")
+    expect(defaultDirection("deck")).toBe("asc")
     expect(defaultDirection("lapses")).toBe("desc")
     expect(defaultDirection("difficulty")).toBe("desc")
     expect(defaultDirection("number")).toBe("asc")

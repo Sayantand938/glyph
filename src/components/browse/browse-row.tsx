@@ -106,7 +106,7 @@ export function BrowseListRow({
   onBury,
 }: {
   row: BrowseRow
-  /** "Physics > Mechanics" for a mixed list, the topic name inside one Subject or Topic. */
+  /** The deck's full path, "Physics > Mechanics". */
   where: string
   now: number
   /** Tags currently used as a filter, shown highlighted. */

@@ -20,12 +20,8 @@ export {
 } from "./stream"
 export {
   FIRST_BACKUP_MIN_CHANGES,
-  KEEP_AUTO_BACKUPS,
   REMIND_AFTER_CHANGES,
   REMIND_AFTER_DAYS,
-  autoBackupDue,
-  autoBackupName,
-  autoBackupsToDelete,
   backupDue,
   describeBackupAge,
   parseLastBackup,

@@ -43,9 +43,11 @@ export interface BrowseCard {
 export interface BrowseRow {
   /** The note id (the card id is the same). */
   id: string
+  /** The deck the question is in, and its full path ("WBCS > Mains > 2018"). */
+  /** Same as the note's `topicId` (the deck's id); the card-count helpers read it. */
   topicId: string
-  topicName: string
-  subjectName: string
+  deckName: string
+  deckPath: string
   sl: number | string
   /** One line of plain text for the list. */
   preview: string
@@ -130,15 +132,15 @@ export function noteAsJson(note: {
 export function makeBrowseRow(
   note: BrowseNote,
   card: BrowseCard | undefined,
-  topicName: string,
-  subjectName: string
+  deckName: string,
+  deckPath: string
 ): BrowseRow {
   const progress = card ?? NO_PROGRESS
   return {
     id: note.id,
     topicId: note.topicId,
-    topicName,
-    subjectName,
+    deckName,
+    deckPath,
     sl: note.sl,
     preview: previewText(note.question),
     tags: [...note.tags],
@@ -313,7 +315,7 @@ export type BrowseSort =
   | "flag"
   | "number"
   | "question"
-  | "topic"
+  | "deck"
   | "tags"
   | "state"
   | "due"
@@ -362,11 +364,8 @@ function compareBy(a: BrowseRow, b: BrowseRow, sort: BrowseSort): number {
       const y = dueKey(b)
       return x === y ? 0 : x < y ? -1 : 1
     }
-    case "topic":
-      return compareText(
-        `${a.subjectName} > ${a.topicName}`,
-        `${b.subjectName} > ${b.topicName}`
-      )
+    case "deck":
+      return compareText(a.deckPath, b.deckPath)
     case "tags":
       return compareText(a.tags.join(" "), b.tags.join(" "))
     case "state":

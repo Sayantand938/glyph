@@ -441,7 +441,7 @@ export function simulate(
 
 /**
  * Like `simulate`, but `afterDay` runs between days and may change
- * `weights.current`, as the automatic refit does in the app.
+ * `weights.current`, as a manual refit does in the app.
  */
 export async function simulateAdaptive(
   scenario: Scenario,

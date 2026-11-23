@@ -29,6 +29,7 @@ import {
   type BrowseSort,
   type SortDirection,
 } from "@/lib/browse"
+import { LoadingBlock } from "@/components/ui/spinner"
 import { flagName, isBuried } from "@/lib/card-marks"
 import { tagCounts } from "@/lib/tags"
 
@@ -46,7 +47,7 @@ const COLUMNS: { label: string; sort: BrowseSort; align?: "right" }[] = [
   { label: "Flag", sort: "flag" },
   { label: "No.", sort: "number" },
   { label: "Question", sort: "question" },
-  { label: "Topic", sort: "topic" },
+  { label: "Deck", sort: "deck" },
   { label: "Tags", sort: "tags" },
   { label: "State", sort: "state" },
   { label: "Due", sort: "due" },
@@ -97,7 +98,7 @@ function SortHeader({
 }
 
 /**
- * Browse the questions of a Subject, a Topic or everything (`scope` null):
+ * Browse the questions of a deck (with everything below it) or everything (`scope` null):
  * search, filter by state, sort by any column, and edit or delete a question
  * (or copy it as JSON) from its Actions menu. The table scrolls sideways on narrow screens. Rows
  * are read live; editing and deleting open as full pages in place of the list
@@ -263,11 +264,6 @@ export function BrowsePage({
     }
   }
 
-  // Inside one Subject or Topic the Subject name is redundant.
-  // A tag list spans decks, so it shows the full path like the all-questions list.
-  const where = (rowSubject: string, rowTopic: string): string =>
-    scope && scope.kind !== "tag" ? rowTopic : `${rowSubject} > ${rowTopic}`
-
   if (editingNote) {
     return (
       <EditNotePage
@@ -339,9 +335,7 @@ export function BrowsePage({
       )}
 
       {!items ? (
-        <p className="py-4 text-sm text-muted-foreground" role="status">
-          Loading...
-        </p>
+        <LoadingBlock label="Loading questions" />
       ) : rows.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">
           No questions here yet. Import a JSON file from Settings.
@@ -496,7 +490,7 @@ export function BrowsePage({
                       <BrowseListRow
                         key={row.id}
                         row={row}
-                        where={where(row.subjectName, row.topicName)}
+                        where={row.deckPath}
                         now={now}
                         activeTags={activeTags}
                         onTag={toggleTag}

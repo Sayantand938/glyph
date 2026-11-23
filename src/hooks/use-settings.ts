@@ -11,8 +11,8 @@ import {
 } from "@/lib/settings"
 
 /**
- * Every setting that syncs with the data (retention, fitted weights, auto-fit,
- * leech rule), read live from the database: a change from another tab, or one
+ * Every setting that syncs with the data (retention, fitted weights, leech
+ * rule), read live from the database: a change from another tab, or one
  * that arrives in a sync or a restored backup, shows up at once. Until the
  * first read finishes (a few milliseconds) the defaults are returned and
  * `loaded` is false.

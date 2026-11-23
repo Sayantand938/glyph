@@ -4,6 +4,7 @@ import { DeleteNotePage } from "@/components/delete-note-page"
 import { EditNotePage } from "@/components/edit-note-page"
 import { flagBorder } from "@/components/flag-style"
 import { Button } from "@/components/ui/button"
+import { LoadingBlock } from "@/components/ui/spinner"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
 import type { StudyOptions } from "@/lib/study-options"
 
@@ -69,6 +70,7 @@ export function StudySession({
     onExitRequest: requestExit,
     onLeave: onExit,
     onUndo: () => void s.undo(),
+    onRedo: () => void s.redo(),
     onEdit: () => setEditing(true),
     onPick: s.pick,
     onNext: s.next,
@@ -90,13 +92,7 @@ export function StudySession({
       </div>
     )
   }
-  if (!run) {
-    return (
-      <p className="py-8 text-sm text-muted-foreground" role="status">
-        Loading...
-      </p>
-    )
-  }
+  if (!run) return <LoadingBlock label="Loading cards" />
 
   // Editing, deleting and the leave prompt are full pages in place of the
   // session. This component (and so the run's state) stays mounted behind them.
@@ -138,12 +134,14 @@ export function StudySession({
         counter={counter}
         shuffle={s.shuffle}
         canUndo={s.canUndo}
+        canRedo={s.canRedo}
         canEdit={!!data && !s.finished && !s.empty}
         flag={data?.card.flag ?? 0}
         suspended={data?.card.suspended ?? false}
         onExit={requestExit}
         onToggleShuffle={() => s.setShuffle(!s.shuffle)}
         onUndo={() => void s.undo()}
+        onRedo={() => void s.redo()}
         onEdit={() => setEditing(true)}
         onDelete={() => setDeleting(true)}
         onFlag={(flag) => void s.flagCurrent(flag)}
@@ -177,9 +175,7 @@ export function StudySession({
       ) : s.gone ? (
         <GoneState onSkip={s.skipGone} />
       ) : !data ? (
-        <p className="py-4 text-sm text-muted-foreground" role="status">
-          Loading...
-        </p>
+        <LoadingBlock label="Loading the question" />
       ) : (
         <div
           className={
@@ -201,7 +197,7 @@ export function StudySession({
         </div>
       )}
 
-      {!s.empty && !s.finished && (
+      {!s.empty && !s.finished && data && (
         <p className="mt-auto pt-2 text-center text-xs text-muted-foreground">
           {hintFor(run.phase.kind)}
         </p>

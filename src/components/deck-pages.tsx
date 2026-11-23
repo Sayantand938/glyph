@@ -3,7 +3,7 @@ import { AlertTriangleIcon } from "lucide-react"
 
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import { renameDeck, softDeleteDeck } from "@/db/repo"
+import { createDeck, renameDeck, softDeleteDeck } from "@/db/repo"
 import type { Deck } from "@/db/types"
 import { deckNameKey } from "@/lib/importer"
 
@@ -52,7 +52,7 @@ export function RenameDeckPage({
 
   return (
     <PageShell
-      title={`Rename ${deck.parentId === null ? "subject" : "topic"}`}
+      title="Rename deck"
       description="Questions and study progress are kept."
       onBack={onClose}
       backDisabled={busy}
@@ -98,19 +98,106 @@ export function RenameDeckPage({
   )
 }
 
+/** Makes a new deck: at the top (`parent` null) or inside `parent`, to any depth. */
+export function CreateDeckPage({
+  parent,
+  siblings,
+  onClose,
+}: {
+  parent: Deck | null
+  /** The live decks at that level, to catch duplicate names. */
+  siblings: readonly Deck[]
+  onClose: () => void
+}) {
+  const id = React.useId()
+  const [name, setName] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const trimmed = name.trim()
+  const clash = siblings.some(
+    (d) => deckNameKey(d.name) === deckNameKey(trimmed)
+  )
+  const problem = !trimmed
+    ? null
+    : clash
+      ? "A deck with that name already exists here."
+      : null
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    if (!trimmed || problem || busy) return
+    setBusy(true)
+    try {
+      await createDeck(trimmed, parent?.id ?? null)
+      onClose()
+    } catch (e) {
+      setError(errorMessage(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <PageShell
+      title={parent ? "New sub-deck" : "New deck"}
+      description={
+        parent
+          ? `Inside "${parent.name}". Questions can go in any deck, and a deck's numbers include the decks inside it.`
+          : "Questions can go in any deck, and a deck's numbers include the decks inside it."
+      }
+      onBack={onClose}
+      backDisabled={busy}
+      onSubmit={(e) => void save(e)}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy || !trimmed || problem !== null}>
+            {busy ? "Creating..." : "Create"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={id} className="text-xs font-medium">
+          Name
+        </label>
+        <input
+          id={id}
+          autoFocus
+          className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            setError(null)
+          }}
+        />
+        <p role="alert" className="min-h-4 text-xs">
+          {error ?? problem}
+        </p>
+      </div>
+    </PageShell>
+  )
+}
+
 export function DeleteDeckPage({
   deck,
-  topicCount,
+  descendants,
   onClose,
 }: {
   deck: Deck
-  /** Topics that go with it when `deck` is a Subject. */
-  topicCount: number
+  /** Decks inside it, at any depth: they go with it. */
+  descendants: number
   onClose: () => void
 }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const isSubject = deck.parentId === null
 
   async function confirm() {
     if (busy) return
@@ -126,11 +213,7 @@ export function DeleteDeckPage({
 
   return (
     <PageShell
-      title={
-        <>
-          Delete {isSubject ? "subject" : "topic"} &ldquo;{deck.name}&rdquo;?
-        </>
-      }
+      title={<>Delete deck &ldquo;{deck.name}&rdquo;?</>}
       onBack={onClose}
       backDisabled={busy}
       footer={
@@ -149,8 +232,8 @@ export function DeleteDeckPage({
       }
     >
       <p className="text-sm text-muted-foreground">
-        {isSubject && topicCount > 0
-          ? `Its ${topicCount === 1 ? "topic" : `${topicCount} topics`} and all questions will be removed from the app.`
+        {descendants > 0
+          ? `The ${descendants === 1 ? "deck" : `${descendants} decks`} inside it and all questions in them will be removed from the app too.`
           : "All its questions will be removed from the app."}{" "}
         The deletion is recorded in backups, so restoring an older backup
         won&apos;t bring it back.

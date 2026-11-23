@@ -1,21 +1,15 @@
 import * as React from "react"
-import { UploadIcon } from "lucide-react"
+import { PlusIcon, UploadIcon } from "lucide-react"
 
-import { DeleteDeckPage, RenameDeckPage } from "@/components/deck-pages"
+import { CreateDeckPage } from "@/components/deck-pages"
 import { DeckTree, type StudyScope } from "@/components/deck-tree"
-import { TagList } from "@/components/tag-list"
 import { Button } from "@/components/ui/button"
+import { LoadingBlock } from "@/components/ui/spinner"
 import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadDashboard } from "@/db/queries"
-import type { Deck } from "@/db/types"
-import { useScrollRestore } from "@/hooks/use-scroll-restore"
 import { useStoredState } from "@/hooks/use-stored-state"
 
 const TICK_MS = 60_000
-
-function parseFlag(stored: unknown): boolean | null {
-  return typeof stored === "boolean" ? stored : null
-}
 
 function parseIds(stored: unknown): string[] | null {
   return Array.isArray(stored) && stored.every((v) => typeof v === "string")
@@ -24,13 +18,12 @@ function parseIds(stored: unknown): string[] | null {
 }
 
 export function Dashboard({
-  onStudy,
-  onBrowse,
+  onOpen,
   onImportJson,
   onImportBackup,
 }: {
-  onStudy: (scope: StudyScope) => void
-  onBrowse: (scope: StudyScope) => void
+  /** A deck was clicked: open its screen (study, browse, add, rename, delete). */
+  onOpen: (scope: StudyScope) => void
   onImportJson: () => void
   onImportBackup: () => void
 }) {
@@ -54,25 +47,23 @@ export function Dashboard({
   )
   const collapsed = React.useMemo(() => new Set(collapsedIds), [collapsedIds])
 
-  const [tagsCollapsed, setTagsCollapsed] = useStoredState(
-    "glyph.tagsCollapsed",
-    false,
-    parseFlag
-  )
+  const [creating, setCreating] = React.useState(false)
 
-  const [renaming, setRenaming] = React.useState<Deck | null>(null)
-  const [deleting, setDeleting] = React.useState<Deck | null>(null)
-  useScrollRestore(renaming !== null || deleting !== null)
+  if (!data) return <LoadingBlock label="Loading your decks" />
 
-  if (!data) {
+  const topLevel = data.children.get(null) ?? []
+
+  if (creating) {
     return (
-      <p className="py-8 text-sm text-muted-foreground" role="status">
-        Loading...
-      </p>
+      <CreateDeckPage
+        parent={null}
+        siblings={topLevel}
+        onClose={() => setCreating(false)}
+      />
     )
   }
 
-  if (data.subjects.length === 0) {
+  if (topLevel.length === 0) {
     return (
       <div className="flex flex-col items-start gap-3 py-8">
         <p className="text-lg font-semibold tracking-tight">No decks yet.</p>
@@ -84,38 +75,15 @@ export function Dashboard({
             <UploadIcon data-icon="inline-start" />
             Import JSON
           </Button>
+          <Button variant="outline" onClick={() => setCreating(true)}>
+            <PlusIcon data-icon="inline-start" />
+            New deck
+          </Button>
           <Button variant="outline" onClick={onImportBackup}>
             Import Backup
           </Button>
         </div>
       </div>
-    )
-  }
-
-  const siblings = renaming
-    ? renaming.parentId === null
-      ? data.subjects
-      : (data.topics.get(renaming.parentId) ?? [])
-    : []
-
-  if (renaming) {
-    return (
-      <RenameDeckPage
-        key={renaming.id}
-        deck={renaming}
-        siblings={siblings}
-        onClose={() => setRenaming(null)}
-      />
-    )
-  }
-  if (deleting) {
-    return (
-      <DeleteDeckPage
-        key={deleting.id}
-        deck={deleting}
-        topicCount={data.topics.get(deleting.id)?.length ?? 0}
-        onClose={() => setDeleting(null)}
-      />
     )
   }
 
@@ -131,19 +99,14 @@ export function Dashboard({
               : [...collapsedIds, id]
           )
         }
-        onStudy={onStudy}
-        onBrowse={onBrowse}
-        onRename={setRenaming}
-        onDelete={setDeleting}
+        onOpen={onOpen}
       />
-
-      <TagList
-        tags={data.tags}
-        collapsed={tagsCollapsed}
-        onToggle={() => setTagsCollapsed(!tagsCollapsed)}
-        onStudy={onStudy}
-        onBrowse={onBrowse}
-      />
+      <div>
+        <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+          <PlusIcon data-icon="inline-start" />
+          New deck
+        </Button>
+      </div>
     </div>
   )
 }

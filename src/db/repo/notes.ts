@@ -1,9 +1,12 @@
 import { marksOf } from "@/lib/card-marks"
+import { noteId } from "@/lib/hash"
+import type { NoteDraft } from "@/lib/note-edit"
 
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
-import { CARDS, NOTES, getRow, putNotes, putRows } from "../tables"
+import { CARDS, NOTES, addRows, getRow, putNotes, putRows } from "../tables"
 import type { Note } from "../types"
+import { isLiveDeck } from "./decks"
 import { deleteOrphanImages } from "./images"
 
 /**
@@ -45,6 +48,66 @@ export async function saveNote(
     // Pictures the edit dropped (or a cancelled paste left behind) go too.
     await deleteOrphanImages(tx)
     return saved
+  })
+}
+
+/**
+ * Adds one question to a deck by hand (the draft is already cleaned). The id
+ * is the usual deterministic one (`noteId`), so the same wording in the same
+ * deck is the same question: a live one is refused, a deleted one comes back
+ * with its old progress (like importing it again). A new question gets a fresh
+ * card and the next number after the deck's highest (`sl`).
+ */
+export async function addNote(
+  topicId: string,
+  draft: NoteDraft,
+  now = Date.now()
+): Promise<Note> {
+  return db.transaction(async (tx) => {
+    if (!(await isLiveDeck(tx, topicId))) {
+      throw new Error("That deck no longer exists.")
+    }
+
+    const id = noteId(topicId, draft.question)
+    const existing = await getRow(tx, NOTES, id)
+    if (existing && existing.deletedAt === null) {
+      throw new Error("This question is already in this deck.")
+    }
+
+    let sl: number | string
+    if (existing) {
+      sl = existing.sl
+    } else {
+      const rows = await tx.select(
+        "SELECT sl FROM notes WHERE topicId = ? AND deletedAt IS NULL",
+        [topicId]
+      )
+      const numbers = rows.map((row) => Number(row.sl)).filter(Number.isFinite)
+      sl = (numbers.length > 0 ? Math.max(...numbers) : 0) + 1
+    }
+
+    const note: Note = {
+      id,
+      topicId,
+      sl,
+      question: draft.question,
+      options: draft.options,
+      correctIndex: draft.correctIndex,
+      extra: draft.extra,
+      tags: draft.tags,
+      // Newer than any tombstone or older copy of this note, so it wins a merge.
+      contentUpdatedAt: Math.max(
+        now,
+        (existing?.contentUpdatedAt ?? 0) + 1,
+        (existing?.deletedAt ?? 0) + 1
+      ),
+      deletedAt: null,
+    }
+    await putNotes(tx, [note])
+    if (!(await getRow(tx, CARDS, id))) {
+      await addRows(tx, CARDS, [emptyCardRow(note, now)])
+    }
+    return note
   })
 }
 

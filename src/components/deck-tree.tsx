@@ -1,36 +1,24 @@
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  EllipsisIcon,
-  ListIcon,
-  PencilIcon,
-  Trash2Icon,
-} from "lucide-react"
+import * as React from "react"
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import type { DashboardData } from "@/db/queries"
-import type { Deck } from "@/db/types"
-import {
-  ZERO_COUNTS,
-  addCounts,
-  totalCount,
-  type DeckCounts,
-} from "@/lib/queue"
+import { flattenTree, rollupCounts, type TreeRow } from "@/lib/deck-tree"
+import { ZERO_COUNTS, type DeckCounts } from "@/lib/queue"
 
 export interface StudyScope {
-  /** A tag spans every deck: `id` is then the tag itself and `name` is "#tag". */
-  kind: "subject" | "topic" | "tag"
+  /** A deck covers everything below it too. A tag spans every deck: `id` is then the tag itself and `name` is "#tag". */
+  kind: "deck" | "tag"
   id: string
   name: string
+  /** A deck with sub-decks mixes their cards in one session (set by the deck screen). */
+  mixed?: boolean
 }
 
 export const cell = "w-9 shrink-0 text-right tabular-nums"
+
+/** Width of one level of the tree (and of the chevron column), and where its line runs. */
+const LEVEL = "w-6"
+const LINE = "border-muted-foreground/40"
 
 export function CountCells({ counts }: { counts: DeckCounts }) {
   const show = (n: number) => (
@@ -47,89 +35,97 @@ export function CountCells({ counts }: { counts: DeckCounts }) {
   )
 }
 
-function DeckRow({
-  deck,
-  counts,
-  scope,
-  expanded,
-  onToggle,
-  onStudy,
-  onBrowse,
-  onRename,
-  onDelete,
-}: {
-  deck: Deck
-  counts: DeckCounts
-  scope: StudyScope
-  /** undefined for a Topic (no chevron). */
-  expanded?: boolean
-  onToggle?: () => void
-  onStudy: (scope: StudyScope) => void
-  onBrowse: (scope: StudyScope) => void
-  onRename: (deck: Deck) => void
-  onDelete: (deck: Deck) => void
-}) {
-  const isSubject = scope.kind === "subject"
-  const label = isSubject ? "subject" : "topic"
-  const available = totalCount(counts) > 0
+/**
+ * The connector lines to the left of a row, like a file tree: a vertical line
+ * wherever an ancestor has more siblings below, and this row's own elbow (a
+ * line down from its parent, with a stub to the right; it carries on down when
+ * the row has later siblings).
+ */
+function Gutter({ row }: { row: TreeRow }) {
+  if (row.depth === 0) return null
+  const cells: React.ReactNode[] = row.lines.map((through, i) => (
+    <span key={i} className={`relative self-stretch ${LEVEL} shrink-0`}>
+      {through && (
+        <span
+          className={`absolute inset-y-0 left-3 border-l ${LINE}`}
+          aria-hidden
+        />
+      )}
+    </span>
+  ))
+  cells.push(
+    <span key="elbow" className={`relative self-stretch ${LEVEL} shrink-0`}>
+      <span
+        className={`absolute top-0 left-3 border-l ${LINE} ${
+          row.isLast ? "h-1/2" : "bottom-0"
+        }`}
+        aria-hidden
+      />
+      <span
+        className={`absolute top-1/2 left-3 border-t ${LINE} ${
+          row.hasChildren ? "w-3" : "w-6"
+        }`}
+        aria-hidden
+      />
+    </span>
+  )
+  return <>{cells}</>
+}
 
+function DeckRow({
+  row,
+  counts,
+  onToggle,
+  onOpen,
+}: {
+  row: TreeRow
+  counts: DeckCounts
+  onToggle: (id: string) => void
+  onOpen: (scope: StudyScope) => void
+}) {
+  const { deck } = row
   return (
     <div
-      className={`flex items-center gap-1 py-1.5 ${isSubject ? "" : "pl-6"}`}
+      className={`flex items-stretch ${row.depth === 0 ? "border-t first:border-t-0" : ""}`}
     >
-      {isSubject ? (
+      <Gutter row={row} />
+
+      {row.hasChildren ? (
         <button
           type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg py-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          onClick={() => onToggle(deck.id)}
+          aria-expanded={row.expanded}
+          aria-label={`${row.expanded ? "Collapse" : "Expand"} ${deck.name}`}
+          className={`flex ${LEVEL} shrink-0 items-center justify-center rounded-lg outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50`}
         >
-          {expanded ? (
-            <ChevronDownIcon className="size-4 shrink-0" aria-hidden />
+          {row.expanded ? (
+            <ChevronDownIcon className="size-4" aria-hidden />
           ) : (
-            <ChevronRightIcon className="size-4 shrink-0" aria-hidden />
+            <ChevronRightIcon className="size-4" aria-hidden />
           )}
-          <span className="truncate font-semibold">{deck.name}</span>
         </button>
       ) : (
-        <span className="min-w-0 flex-1 truncate py-1">{deck.name}</span>
+        <span className={`${LEVEL} shrink-0`} aria-hidden />
       )}
 
-      <CountCells counts={counts} />
-
-      <Button
-        variant={available ? "default" : "outline"}
-        size="sm"
-        className="ml-1 w-14"
-        disabled={!available}
-        aria-label={`Study ${label} ${deck.name}`}
-        onClick={() => onStudy(scope)}
+      {/* The whole row (name and counts) opens the deck. */}
+      <button
+        type="button"
+        onClick={() => onOpen({ kind: "deck", id: deck.id, name: deck.name })}
+        aria-label={`Open deck ${deck.name}`}
+        className="group my-0.5 flex min-w-0 flex-1 items-center gap-1 rounded-lg py-2 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        Study
-      </Button>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon-sm" />}
-          aria-label={`Actions for ${label} ${deck.name}`}
+        <span
+          className={`min-w-0 flex-1 truncate pl-1 ${row.depth === 0 ? "font-semibold" : ""}`}
         >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onClick={() => onBrowse(scope)}>
-            <ListIcon aria-hidden />
-            Browse
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onRename(deck)}>
-            <PencilIcon aria-hidden />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onDelete(deck)}>
-            <Trash2Icon aria-hidden />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {deck.name}
+        </span>
+        <CountCells counts={counts} />
+        <ChevronRightIcon
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+          aria-hidden
+        />
+      </button>
     </div>
   )
 }
@@ -138,19 +134,23 @@ export function DeckTree({
   data,
   collapsed,
   onToggle,
-  onStudy,
-  onBrowse,
-  onRename,
-  onDelete,
+  onOpen,
 }: {
   data: DashboardData
   collapsed: ReadonlySet<string>
-  onToggle: (subjectId: string) => void
-  onStudy: (scope: StudyScope) => void
-  onBrowse: (scope: StudyScope) => void
-  onRename: (deck: Deck) => void
-  onDelete: (deck: Deck) => void
+  onToggle: (deckId: string) => void
+  onOpen: (scope: StudyScope) => void
 }) {
+  // A deck's numbers include everything below it, whether or not it is open.
+  const totals = React.useMemo(
+    () => rollupCounts(data.children, data.counts),
+    [data.children, data.counts]
+  )
+  const rows = React.useMemo(
+    () => flattenTree(data.children, collapsed),
+    [data.children, collapsed]
+  )
+
   return (
     <div className="flex flex-col text-sm">
       <div
@@ -161,55 +161,19 @@ export function DeckTree({
         <span className={cell}>New</span>
         <span className={cell}>Lrn</span>
         <span className={cell}>Due</span>
-        {/* Matches the Study button (ml-1 + w-14) and the actions button. */}
-        <span className="ml-1 w-14 shrink-0" />
-        <span className="w-7 shrink-0" />
+        {/* Matches the arrow at the end of each row. */}
+        <span className="size-4 shrink-0" />
       </div>
 
-      {data.subjects.map((subject) => {
-        const topics = data.topics.get(subject.id) ?? []
-        const topicCounts = (id: string) => data.counts.get(id) ?? ZERO_COUNTS
-        const subjectCounts = topics.reduce(
-          (sum, t) => addCounts(sum, topicCounts(t.id)),
-          ZERO_COUNTS
-        )
-        const isOpen = !collapsed.has(subject.id)
-
-        return (
-          <div key={subject.id} className="border-b last:border-b-0">
-            <DeckRow
-              deck={subject}
-              counts={subjectCounts}
-              scope={{ kind: "subject", id: subject.id, name: subject.name }}
-              expanded={isOpen}
-              onToggle={() => onToggle(subject.id)}
-              onStudy={onStudy}
-              onBrowse={onBrowse}
-              onRename={onRename}
-              onDelete={onDelete}
-            />
-            {isOpen &&
-              (topics.length === 0 ? (
-                <p className="pb-2 pl-6 text-xs text-muted-foreground">
-                  No topics yet. Import a JSON file into this subject.
-                </p>
-              ) : (
-                topics.map((topic) => (
-                  <DeckRow
-                    key={topic.id}
-                    deck={topic}
-                    counts={topicCounts(topic.id)}
-                    scope={{ kind: "topic", id: topic.id, name: topic.name }}
-                    onStudy={onStudy}
-                    onBrowse={onBrowse}
-                    onRename={onRename}
-                    onDelete={onDelete}
-                  />
-                ))
-              ))}
-          </div>
-        )
-      })}
+      {rows.map((row) => (
+        <DeckRow
+          key={row.deck.id}
+          row={row}
+          counts={totals.get(row.deck.id) ?? ZERO_COUNTS}
+          onToggle={onToggle}
+          onOpen={onOpen}
+        />
+      ))}
     </div>
   )
 }

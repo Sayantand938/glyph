@@ -42,7 +42,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
   {
     title: "Session",
     items: [
-      { keys: ["Z"], label: "Undo the last answer, suspend or bury" },
+      { keys: ["Z", "Ctrl+Z"], label: "Undo the last answer, suspend or bury" },
+      { keys: ["Y", "Ctrl+Y"], label: "Redo what you just undid" },
       { keys: ["Esc"], label: "Leave the session" },
       { keys: ["?"], label: "Show this list" },
     ],

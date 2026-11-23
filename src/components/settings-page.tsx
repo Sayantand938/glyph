@@ -5,7 +5,6 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   FileUpIcon,
-  FolderIcon,
   ShareIcon,
   MonitorIcon,
   MoonIcon,
@@ -23,7 +22,6 @@ import {
   MAX_RETENTION,
   MIN_RETENTION,
 } from "@/db/scheduler"
-import type { AutoBackup } from "@/hooks/use-auto-backup"
 import type { BackupStatus } from "@/hooks/use-backup-status"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
 import { useSetting } from "@/hooks/use-settings"
@@ -160,69 +158,6 @@ function ImportCopies({
   )
 }
 
-function AutoBackupControls({ auto }: { auto: AutoBackup }) {
-  if (!auto.supported) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Saving a backup to a folder by itself needs Chrome or Edge on a
-        computer. On a phone, export a backup now and then; Glyph reminds you.
-      </p>
-    )
-  }
-  if (auto.folder === null) {
-    return (
-      <div className="space-y-2">
-        <p className="text-xs text-muted-foreground">
-          Automatic backup saves a copy to a folder you pick (a synced one such
-          as Dropbox or OneDrive is a good choice) on the first start each day
-          something changed, and keeps the seven newest.
-        </p>
-        <Button variant="outline" size="sm" onClick={() => void auto.choose()}>
-          <FolderIcon data-icon="inline-start" />
-          Choose a folder
-        </Button>
-        {auto.error && (
-          <p role="alert" className="text-xs text-destructive">
-            {auto.error}
-          </p>
-        )}
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
-        Automatic backup is on: &quot;{auto.folder}&quot;.{" "}
-        {auto.running
-          ? "Saving now..."
-          : auto.last
-            ? `Saved ${auto.last.name}.`
-            : auto.needsPermission
-              ? "Waiting for your OK to write there."
-              : "A copy is saved the first time each day something changed."}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {auto.needsPermission && (
-          <Button size="sm" onClick={() => void auto.allow()}>
-            Allow
-          </Button>
-        )}
-        <Button variant="outline" size="sm" onClick={() => void auto.choose()}>
-          Change folder
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => void auto.turnOff()}>
-          Turn off
-        </Button>
-      </div>
-      {auto.error && (
-        <p role="alert" className="text-xs text-destructive">
-          {auto.error}
-        </p>
-      )}
-    </div>
-  )
-}
-
 /**
  * Full-page settings: theme, data (import / export), statistics (placeholder)
  * and app info. Results of the data actions show in the notice banner that
@@ -236,7 +171,6 @@ export function SettingsPage({
   onImportBackup,
   onSync,
   status,
-  auto,
   shareReady,
   onShare,
   snapshots,
@@ -247,7 +181,6 @@ export function SettingsPage({
   onRestore: (meta: SnapshotMeta) => void
   onRemoveSnapshot: (meta: SnapshotMeta) => void
   status: BackupStatus
-  auto: AutoBackup
   shareReady: boolean
   onShare: () => void
   busy: boolean
@@ -475,7 +408,11 @@ export function SettingsPage({
               />
             </div>
             <BackupStatusLine status={status} />
-            <AutoBackupControls auto={auto} />
+            <p className="text-xs text-muted-foreground">
+              Backups are manual: export a file now and then (a synced folder
+              such as Dropbox or OneDrive is a good place to keep it). Glyph
+              reminds you when one is due.
+            </p>
             <ImportCopies
               snapshots={snapshots}
               busy={busy}

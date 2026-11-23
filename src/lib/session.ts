@@ -66,6 +66,30 @@ export function dropCardFrom(
   return queue.filter((id, i) => i < index || id !== cardId)
 }
 
+/** Where a redo would act: the card and queue position that the undo restored. */
+export interface RedoTarget {
+  cardId: string
+  index: number
+}
+
+/**
+ * Whether a redo can be done now. It replays an answer, so the screen must be
+ * back exactly where the undo left it: the same card at the same position,
+ * waiting for an answer. Anything that moves on (a new answer, Next, a skip)
+ * drops the redo list, and picking the right option (not yet saved) pauses it.
+ */
+export function redoApplies(
+  target: RedoTarget | null,
+  screen: { cardId: string | null; index: number; waitingForAnswer: boolean }
+): boolean {
+  return (
+    target !== null &&
+    screen.waitingForAnswer &&
+    screen.cardId === target.cardId &&
+    screen.index === target.index
+  )
+}
+
 /** One answered card view, as far as the summary cares. */
 export interface SessionRecord {
   cardId: string
