@@ -119,15 +119,8 @@ export default function App() {
         )}
       </main>
 
-      <footer className="space-y-1 border-t py-4 text-xs text-muted-foreground">
-        <p>
-          Your data lives only in this browser. Export a backup regularly, and
-          on iPhone or iPad add Glyph to the Home Screen so the system is less
-          likely to clear it.
-        </p>
-        <p>
-          press <kbd className="border px-1">d</kbd> to toggle dark mode
-        </p>
+      <footer className="border-t py-3 text-xs text-muted-foreground">
+        Glyph v{__APP_VERSION__}
       </footer>
 
       <PwaToast />
