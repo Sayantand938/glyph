@@ -1,6 +1,6 @@
 # Glyph
 
-Offline-first, Anki-style MCQ spaced-repetition PWA. Single user, no backend, no auth, no runtime network calls. Data lives in IndexedDB (Dexie), scheduling is FSRS (`ts-fsrs`), and devices sync by moving JSON backup files.
+Offline-first, Anki-style MCQ spaced-repetition PWA. Single user, no backend, no auth, no runtime network calls. Data lives in IndexedDB (Dexie), scheduling is FSRS (`ts-fsrs`), and devices sync by moving JSON backup files or directly over the local network (WebRTC, pairing by copy-and-pasted codes, no server; `src/lib/sync/`).
 
 **Read [STATUS.md](STATUS.md) first.** It holds the full build plan, the phase checkpoints, which phase is current, and where the implementation deliberately differs from the plan. Update it at the end of every phase.
 
@@ -36,7 +36,7 @@ src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn; study/ = study options page and study session; import/ = import page; browse/ = browse page; no modals, edit/confirm/import screens are full pages built on page-shell.tsx)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/, session, browse, note-edit, tags, card-marks, card-history, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/, session, browse, note-edit, tags, card-marks, card-history, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only), sync/ (pairing codes and the wire protocol for device sync; rtc.ts is the browser-only WebRTC part)
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```

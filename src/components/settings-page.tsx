@@ -7,6 +7,7 @@ import {
   FileUpIcon,
   MonitorIcon,
   MoonIcon,
+  RefreshCwIcon,
   SunIcon,
   UploadIcon,
 } from "lucide-react"
@@ -100,9 +101,11 @@ export function SettingsPage({
   onImportJson,
   onExportBackup,
   onImportBackup,
+  onSync,
 }: {
   busy: boolean
   onBack: () => void
+  onSync: () => void
   onImportJson: () => void
   onExportBackup: () => void
   onImportBackup: () => void
@@ -199,6 +202,19 @@ export function SettingsPage({
                 title="Import questions"
                 description="Add decks and questions from a JSON file."
                 onClick={onImportJson}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Devices
+            </p>
+            <div className="divide-y overflow-hidden rounded-xl border">
+              <DataAction
+                icon={<RefreshCwIcon aria-hidden />}
+                title="Sync with another device"
+                description="Merge with a phone or computer on the same wifi, no server."
+                onClick={onSync}
               />
             </div>
           </div>
