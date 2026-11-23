@@ -11,6 +11,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
+import { FsrsOptimizer } from "@/components/fsrs-optimizer"
 import { Button } from "@/components/ui/button"
 import {
   clampRetention,
@@ -150,7 +151,7 @@ export function SettingsPage({
 
       <Section
         title="Scheduling"
-        description="How likely you want to be to remember a card when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on."
+        description="How likely you want to be to truly remember a card (not just guess it) when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on."
       >
         <div className="space-y-2 sm:max-w-sm">
           <div className="flex items-center justify-between text-sm">
@@ -180,6 +181,7 @@ export function SettingsPage({
             Reset to {Math.round(DEFAULT_RETENTION * 100)}%
           </Button>
         </div>
+        <FsrsOptimizer />
       </Section>
 
       <Section

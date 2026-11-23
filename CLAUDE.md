@@ -34,9 +34,9 @@ vite.config.ts      react + tailwind + VitePWA (manifest lives here)
 src/main.tsx        mounts <ThemeProvider><DbProvider><App/>
 src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
-src/components/     React components (ui/ = shadcn; study/ = study session; import/ = import page; browse/ = browse page; no modals, edit/confirm/import screens are full pages built on page-shell.tsx)
+src/components/     React components (ui/ = shadcn; study/ = study options page and study session; import/ = import page; browse/ = browse page; no modals, edit/confirm/import screens are full pages built on page-shell.tsx)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, browse, note-edit, tags, card-marks, math, markdown, image/ (tokens, fit, id, base64; encode.ts is browser-only)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/, session, browse, note-edit, tags, card-marks, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only)
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```
@@ -62,6 +62,7 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 - Card marks (flag, suspended, buriedUntil, markedAt; `src/lib/card-marks.ts`) live on the card row but are not FSRS progress. Reviews, undo and "Reset FSRS progress" must keep them (take them from the stored row, not a screen copy), `countCards`/`buildQueue` skip hidden cards, and backup merge decides them by `markedAt` apart from progress (`pickCard`). Writes go through `src/db/repo/cards.ts`.
 
 - `ts-fsrs` is 5.x: `elapsed_days` is deprecated but still on `Card`; check the installed types rather than guessing the API.
+- Elapsed days are local calendar days, not ts-fsrs's UTC dates: `db/scheduler.ts` shifts the dates it gives ts-fsrs (`lib/fsrs/days.ts`), and the optimizer's history builder uses the same function. Anything that computes "days since the last review" for scheduling must use `elapsedStudyDays`. The optimizer's model in `lib/fsrs/model.ts` mirrors ts-fsrs's formulas; `src/lib/fsrs.test.ts` fails if they drift apart after a `ts-fsrs` upgrade.
 - Keep source files ASCII: write non-ASCII characters (zero-width, combining marks) as `\uXXXX` escapes so tooling can't silently change or hide them. `src/ascii.test.ts` enforces this in `npm test`. Claude's Write/Edit tools turn a typed escape into the literal character, so put escapes in via `sed` or Python from Bash (sed needs the backslash doubled twice), or avoid them (e.g. `&middot;` in JSX text), then re-run the test.
 - `@vitejs/plugin-react@6` has an optional Babel peer that conflicts with shadcn's Babel 7 under npm's resolver; it was installed with `--legacy-peer-deps`. Use the same flag if `npm install` reports an ERESOLVE for it.
 - `@eslint/js` is pinned to `^9` to match `eslint@9`.

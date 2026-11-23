@@ -11,6 +11,7 @@ import {
   buildQueue,
   countCards,
   endOfLocalDay,
+  limitNew,
   totalCount,
   type QueueCard,
 } from "./queue"
@@ -207,5 +208,77 @@ describe("suspended and buried cards", () => {
     const only = [hidden("a", CARD_NEW, NOW, { suspended: true })]
     expect(countCards(only, NOW)).toEqual({ new: 0, learning: 0, due: 0 })
     expect(buildQueue({ cards: only, now: NOW, seed: "s" })).toEqual([])
+  })
+})
+
+describe("buildQueue include and newLimit", () => {
+  const cards = [
+    card("l1", CARD_LEARNING, NOW - 1000),
+    card("r1", CARD_REVIEW, NOW - DAY),
+    card("r2", CARD_REVIEW, NOW + HOUR),
+    card("n1", CARD_NEW, 100),
+    card("n2", CARD_NEW, 200),
+    card("n3", CARD_NEW, 300),
+  ]
+  const build = (
+    extra: Partial<Parameters<typeof buildQueue>[0]> = {}
+  ): string[] => buildQueue({ cards, now: NOW, seed: "s", ...extra })
+
+  it("includes every group by default, unlimited", () => {
+    expect(build().sort()).toEqual(["l1", "n1", "n2", "n3", "r1", "r2"])
+  })
+
+  it("leaves out a whole group", () => {
+    expect(build({ include: { new: false } }).sort()).toEqual([
+      "l1",
+      "r1",
+      "r2",
+    ])
+    expect(build({ include: { due: false, learning: false } }).sort()).toEqual([
+      "n1",
+      "n2",
+      "n3",
+    ])
+    expect(build({ include: { due: false, new: false } })).toEqual(["l1"])
+    expect(build({ include: { learning: false } }).sort()).toEqual([
+      "n1",
+      "n2",
+      "n3",
+      "r1",
+      "r2",
+    ])
+  })
+
+  it("takes the oldest new cards when limited", () => {
+    const only = { include: { due: false, learning: false } }
+    expect(build({ ...only, newLimit: 2 }).sort()).toEqual(["n1", "n2"])
+    expect(build({ ...only, newLimit: 0 })).toEqual([])
+    expect(build({ ...only, newLimit: 99 }).sort()).toEqual(["n1", "n2", "n3"])
+    expect(build({ ...only, newLimit: null }).sort()).toEqual([
+      "n1",
+      "n2",
+      "n3",
+    ])
+  })
+
+  it("never limits learning or due cards", () => {
+    expect(build({ newLimit: 1 }).sort()).toEqual(["l1", "n1", "r1", "r2"])
+  })
+
+  it("works the same for mixed sessions", () => {
+    expect(
+      build({ mixed: true, newLimit: 1, include: { learning: false } }).sort()
+    ).toEqual(["n1", "r1", "r2"])
+  })
+})
+
+describe("limitNew", () => {
+  it("clamps to 0..available", () => {
+    expect(limitNew(5)).toBe(5)
+    expect(limitNew(5, null)).toBe(5)
+    expect(limitNew(5, 3)).toBe(3)
+    expect(limitNew(5, 9)).toBe(5)
+    expect(limitNew(5, -2)).toBe(0)
+    expect(limitNew(5, 2.9)).toBe(2)
   })
 })

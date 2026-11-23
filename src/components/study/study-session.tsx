@@ -5,6 +5,7 @@ import { EditNotePage } from "@/components/edit-note-page"
 import { flagBorder } from "@/components/flag-style"
 import { Button } from "@/components/ui/button"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
+import type { StudyOptions } from "@/lib/study-options"
 
 import type { StudyScope } from "../deck-tree"
 import { EmptyState, FinishedState, GoneState } from "./end-states"
@@ -18,12 +19,14 @@ import { useStudyRun } from "./use-study-run"
 
 export function StudySession({
   scope,
+  options,
   onExit,
 }: {
   scope: StudyScope
+  options: StudyOptions
   onExit: () => void
 }) {
-  const s = useStudyRun(scope)
+  const s = useStudyRun(scope, options)
   const { run, data } = s
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)

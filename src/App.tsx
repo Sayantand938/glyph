@@ -7,16 +7,23 @@ import type { StudyScope } from "@/components/deck-tree"
 import { ImportPage } from "@/components/import/import-page"
 import { PwaToast } from "@/components/pwa-toast"
 import { SettingsPage } from "@/components/settings-page"
+import { StudyOptionsPage } from "@/components/study/study-options-page"
 import { StudySession } from "@/components/study/study-session"
 import { Button } from "@/components/ui/button"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { formatSummary } from "@/lib/importer"
+import type { StudyOptions } from "@/lib/study-options"
 
 export default function App() {
   const [importOpen, setImportOpen] = React.useState(false)
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
-  const [studying, setStudying] = React.useState<StudyScope | null>(null)
+  // Study is two steps: pick what to include, then the session itself.
+  const [picking, setPicking] = React.useState<StudyScope | null>(null)
+  const [studying, setStudying] = React.useState<{
+    scope: StudyScope
+    options: StudyOptions
+  } | null>(null)
   // `scope: null` browses every deck.
   const [browsing, setBrowsing] = React.useState<{
     scope: StudyScope | null
@@ -34,7 +41,7 @@ export default function App() {
         <h1 className="text-base font-semibold tracking-tight">
           glyph<span className="animate-pulse">_</span>
         </h1>
-        {!importOpen && !studying && !settingsOpen && !browsing && (
+        {!importOpen && !studying && !picking && !settingsOpen && !browsing && (
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -89,7 +96,20 @@ export default function App() {
             }
           />
         ) : studying ? (
-          <StudySession scope={studying} onExit={() => setStudying(null)} />
+          <StudySession
+            scope={studying.scope}
+            options={studying.options}
+            onExit={() => setStudying(null)}
+          />
+        ) : picking ? (
+          <StudyOptionsPage
+            scope={picking}
+            onBack={() => setPicking(null)}
+            onStart={(options) => {
+              setStudying({ scope: picking, options })
+              setPicking(null)
+            }}
+          />
         ) : browsing ? (
           <BrowsePage scope={browsing.scope} onBack={() => setBrowsing(null)} />
         ) : settingsOpen ? (
@@ -109,7 +129,7 @@ export default function App() {
             onImportBackup={backup.chooseFile}
             onStudy={(scope) => {
               setNotice(null)
-              setStudying(scope)
+              setPicking(scope)
             }}
             onBrowse={(scope) => {
               setNotice(null)
