@@ -33,6 +33,7 @@ function note(id: string, over: Partial<Note> = {}): Note {
     options: ["a", "b", "c", "d"],
     correctIndex: 0,
     extra: "",
+    tags: [],
     contentUpdatedAt: 100,
     deletedAt: null,
     ...over,
@@ -107,6 +108,45 @@ describe("exportBackup / parseBackup", () => {
     })
     const parsed = parseBackup(serializeBackup(file))
     expect(parsed).toEqual({ ok: true, backup: file })
+  })
+
+  it("round-trips tags", () => {
+    const tagged = data({
+      ...sample,
+      notes: [note("n1", { tags: ["a", "b"] })],
+    })
+    const parsed = parseBackup(serializeBackup(exportBackup(tagged, 1)))
+    expect(parsed.ok && parsed.backup.notes[0].tags).toEqual(["a", "b"])
+  })
+
+  it("reads a note from an older backup (no tags) as untagged", () => {
+    const file = exportBackup(sample, 1)
+    const old = JSON.parse(serializeBackup(file)) as {
+      schemaVersion: number
+      notes: Record<string, unknown>[]
+    }
+    old.schemaVersion = 2
+    for (const n of old.notes) delete n.tags
+    const parsed = parseBackup(JSON.stringify(old))
+    expect(parsed.ok && parsed.backup.notes.map((n) => n.tags)).toEqual([
+      [],
+      [],
+    ])
+  })
+
+  it("normalizes tags it reads and rejects tags that are not a list of text", () => {
+    const file = exportBackup(sample, 1)
+    const dirty = JSON.parse(serializeBackup(file)) as {
+      notes: Record<string, unknown>[]
+    }
+    dirty.notes[0].tags = ["B", "#a", "b"]
+    const parsed = parseBackup(JSON.stringify(dirty))
+    expect(parsed.ok && parsed.backup.notes[0].tags).toEqual(["a", "b"])
+
+    dirty.notes[0].tags = "a b"
+    expect(parseBackup(JSON.stringify(dirty)).ok).toBe(false)
+    dirty.notes[0].tags = [1]
+    expect(parseBackup(JSON.stringify(dirty)).ok).toBe(false)
   })
 
   it("accepts a UTF-8 BOM", () => {
@@ -287,6 +327,25 @@ describe("mergeBackup: decks", () => {
     const dead = data({ decks: [deck("a", { updatedAt: 7, deletedAt: 7 })] })
     expect(mergeBackup(live, dead).merged.decks[0].deletedAt).toBe(7)
     expect(mergeBackup(dead, live).merged.decks[0].deletedAt).toBe(7)
+  })
+})
+
+describe("mergeBackup: tags", () => {
+  it("takes the tags of the newer note edit", () => {
+    const local = data({
+      notes: [note("n1", { tags: ["a"], contentUpdatedAt: 1 })],
+    })
+    const incoming = data({
+      notes: [note("n1", { tags: ["a", "b"], contentUpdatedAt: 2 })],
+    })
+    const { merged, stats } = mergeBackup(local, incoming)
+    expect(merged.notes[0].tags).toEqual(["a", "b"])
+    expect(stats.notesUpdated).toBe(1)
+    // The other direction keeps the newer (incoming-for-it) tags too.
+    expect(mergeBackup(incoming, local).merged.notes[0].tags).toEqual([
+      "a",
+      "b",
+    ])
   })
 })
 

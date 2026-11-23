@@ -7,6 +7,20 @@ import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 import { db } from "./database"
 import type { BackupImage, CardRow, Deck, ImageRow, Note } from "./types"
 
+/**
+ * What a study session or the browse list covers: one Subject, one Topic, or
+ * every question carrying one tag (`id` is then the tag).
+ */
+export interface QueryScope {
+  kind: "subject" | "topic" | "tag"
+  id: string
+}
+
+export interface TagSummary {
+  tag: string
+  counts: DeckCounts
+}
+
 export interface DashboardData {
   /** Live Subjects, sorted by name. */
   subjects: Deck[]
@@ -14,6 +28,8 @@ export interface DashboardData {
   topics: Map<string, Deck[]>
   /** Counts by Topic id. */
   counts: Map<string, DeckCounts>
+  /** Tags used by at least one live question, sorted by name. */
+  tags: TagSummary[]
 }
 
 function byName(a: Deck, b: Deck): number {
@@ -58,39 +74,74 @@ export async function loadDashboard(now: number): Promise<DashboardData> {
       counts.set(id, list ? countCards(list, now) : ZERO_COUNTS)
     }
 
-    return { subjects, topics, counts }
+    // One index lookup per distinct tag; tags only on deleted questions or in
+    // deleted decks have no live cards and are left out.
+    const liveTopics = new Set(topicIds)
+    const tags: TagSummary[] = []
+    for (const tag of (await db.notes
+      .orderBy("tags")
+      .uniqueKeys()) as string[]) {
+      const notes = (await db.notes.where("tags").equals(tag).toArray()).filter(
+        (n) => n.deletedAt === null && liveTopics.has(n.topicId)
+      )
+      if (notes.length === 0) continue
+      const tagged = (await db.cards.bulkGet(notes.map((n) => n.id))).filter(
+        (card): card is CardRow => card !== undefined
+      )
+      tags.push({ tag, counts: countCards(tagged, now) })
+    }
+
+    return { subjects, topics, counts, tags }
   })
+}
+
+/** Live Subjects, and live Topics under them, as ids and names. */
+async function liveDecks(): Promise<{
+  subjects: Map<string, Deck>
+  topics: Deck[]
+}> {
+  const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
+  const subjects = new Map(
+    decks.filter((d) => d.parentId === null).map((d) => [d.id, d])
+  )
+  const topics = decks.filter(
+    (d) => d.parentId !== null && subjects.has(d.parentId)
+  )
+  return { subjects, topics }
+}
+
+/** The live Topics a scope covers (all of them for a tag, which spans decks). */
+function topicsInScope(topics: Deck[], scope: QueryScope | null): Deck[] {
+  if (scope === null || scope.kind === "tag") return topics
+  return topics.filter((t) =>
+    scope.kind === "subject" ? t.parentId === scope.id : t.id === scope.id
+  )
+}
+
+/** The live notes of `topics`; with a tag scope only those carrying the tag. */
+async function liveNotesIn(
+  topics: Deck[],
+  scope: QueryScope | null
+): Promise<Note[]> {
+  const ids = topics.map((t) => t.id)
+  const notes =
+    scope?.kind === "tag"
+      ? await db.notes.where("tags").equals(scope.id).toArray()
+      : await db.notes.where("topicId").anyOf(ids).toArray()
+  const topicIds = new Set(ids)
+  return notes.filter((n) => n.deletedAt === null && topicIds.has(n.topicId))
 }
 
 /**
  * The cards a study session can draw from: cards of live notes in live Topics
  * (under live Subjects) within `scope`. Feed the result to `buildQueue`.
  */
-export async function loadStudyCards(scope: {
-  kind: "subject" | "topic"
-  id: string
-}): Promise<CardRow[]> {
+export async function loadStudyCards(scope: QueryScope): Promise<CardRow[]> {
   return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
-    const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
-    const liveSubjects = new Set(
-      decks.filter((d) => d.parentId === null).map((d) => d.id)
-    )
-    const topicIds = decks
-      .filter(
-        (d) =>
-          d.parentId !== null &&
-          liveSubjects.has(d.parentId) &&
-          (scope.kind === "subject"
-            ? d.parentId === scope.id
-            : d.id === scope.id)
-      )
-      .map((d) => d.id)
-
-    const deadNotes = new Set(
-      await db.notes.where("deletedAt").above(0).primaryKeys()
-    )
-    const cards = await db.cards.where("topicId").anyOf(topicIds).toArray()
-    return cards.filter((card) => !deadNotes.has(card.noteId))
+    const { topics } = await liveDecks()
+    const notes = await liveNotesIn(topicsInScope(topics, scope), scope)
+    const cards = await db.cards.bulkGet(notes.map((n) => n.id))
+    return cards.filter((card): card is CardRow => card !== undefined)
   })
 }
 
@@ -105,30 +156,14 @@ export interface BrowseItem {
  * the browse list: live notes in live Topics under live Subjects.
  */
 export async function loadBrowseItems(
-  scope: { kind: "subject" | "topic"; id: string } | null
+  scope: QueryScope | null
 ): Promise<BrowseItem[]> {
   return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
-    const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
-    const subjects = new Map(
-      decks.filter((d) => d.parentId === null).map((d) => [d.id, d])
-    )
-    const topics = decks.filter(
-      (d) =>
-        d.parentId !== null &&
-        subjects.has(d.parentId) &&
-        (scope === null ||
-          (scope.kind === "subject"
-            ? d.parentId === scope.id
-            : d.id === scope.id))
-    )
+    const { subjects, topics: allTopics } = await liveDecks()
+    const topics = topicsInScope(allTopics, scope)
     const topicById = new Map(topics.map((t) => [t.id, t]))
 
-    const notes = (
-      await db.notes
-        .where("topicId")
-        .anyOf([...topicById.keys()])
-        .toArray()
-    ).filter((n) => n.deletedAt === null)
+    const notes = await liveNotesIn(topics, scope)
     const cards = await db.cards.bulkGet(notes.map((n) => n.id))
 
     return notes.map((note, i) => {
@@ -222,4 +257,9 @@ export async function readBackupSnapshot(): Promise<{
     })
   }
   return { data, images }
+}
+
+/** Every tag used by any note (deleted ones included), sorted, for suggestions. */
+export async function loadTagNames(): Promise<string[]> {
+  return (await db.notes.orderBy("tags").uniqueKeys()) as string[]
 }

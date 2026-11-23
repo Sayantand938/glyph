@@ -12,6 +12,7 @@ const base: NoteDraft = {
   options: ["Paris", "Rome", "Madrid", "Berlin"],
   correctIndex: 0,
   extra: "Paris has been the capital since 987.",
+  tags: ["europe"],
 }
 
 describe("validateDraft", () => {
@@ -42,6 +43,19 @@ describe("validateDraft", () => {
   })
 })
 
+describe("validateDraft: tags", () => {
+  it("accepts no tags", () => {
+    expect(validateDraft({ ...base, tags: [] }).valid).toBe(true)
+  })
+
+  it("flags a tag that is too long", () => {
+    const result = validateDraft({ ...base, tags: ["x".repeat(100)] })
+    expect(result.valid).toBe(false)
+    expect(result.errors.tags).not.toBeNull()
+    expect(result.errors.question).toBeNull()
+  })
+})
+
 describe("cleanDraft", () => {
   it("trims every text field", () => {
     expect(
@@ -50,12 +64,14 @@ describe("cleanDraft", () => {
         options: [" a", "b ", " c ", "d"],
         correctIndex: 2,
         extra: "  e\n",
+        tags: ["x"],
       })
     ).toEqual({
       question: "Q",
       options: ["a", "b", "c", "d"],
       correctIndex: 2,
       extra: "e",
+      tags: ["x"],
     })
   })
 })
@@ -74,6 +90,10 @@ describe("draftChangesNote", () => {
     ).toBe(true)
     expect(draftChangesNote(base, { ...base, correctIndex: 1 })).toBe(true)
     expect(draftChangesNote(base, { ...base, extra: "" })).toBe(true)
+    expect(
+      draftChangesNote(base, { ...base, tags: ["europe", "capitals"] })
+    ).toBe(true)
+    expect(draftChangesNote(base, { ...base, tags: [] })).toBe(true)
     expect(
       draftChangesNote(base, {
         ...base,

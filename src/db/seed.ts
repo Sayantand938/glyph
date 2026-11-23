@@ -9,7 +9,7 @@ const TOPIC_ID = "d_seed_topic"
 
 type SeedQuestion = Pick<
   Note,
-  "question" | "options" | "correctIndex" | "extra"
+  "question" | "options" | "correctIndex" | "extra" | "tags"
 >
 
 const QUESTIONS: SeedQuestion[] = [
@@ -19,18 +19,21 @@ const QUESTIONS: SeedQuestion[] = [
     correctIndex: 1,
     extra:
       "Jupiter's mass is more than twice that of all other planets combined.",
+    tags: ["astronomy"],
   },
   {
     question: "What is the chemical symbol for gold?",
     options: ["Ag", "Gd", "Au", "Go"],
     correctIndex: 2,
     extra: "Au comes from the Latin word for gold, aurum.",
+    tags: ["chemistry"],
   },
   {
     question: "Which of these is the longest river in Africa?",
     options: ["Congo", "Niger", "Zambezi", "Nile"],
     correctIndex: 3,
     extra: "The Nile is roughly 6,650 km long.",
+    tags: ["geography"],
   },
 ]
 

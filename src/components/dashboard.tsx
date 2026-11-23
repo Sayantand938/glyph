@@ -2,14 +2,20 @@ import * as React from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { UploadIcon } from "lucide-react"
 
-import { DeleteDeckDialog, RenameDeckDialog } from "@/components/deck-dialogs"
+import { DeleteDeckPage, RenameDeckPage } from "@/components/deck-pages"
 import { DeckTree, type StudyScope } from "@/components/deck-tree"
+import { TagList } from "@/components/tag-list"
 import { Button } from "@/components/ui/button"
 import { loadDashboard } from "@/db/queries"
 import type { Deck } from "@/db/types"
+import { useScrollRestore } from "@/hooks/use-scroll-restore"
 import { useStoredState } from "@/hooks/use-stored-state"
 
 const TICK_MS = 60_000
+
+function parseFlag(stored: unknown): boolean | null {
+  return typeof stored === "boolean" ? stored : null
+}
 
 function parseIds(stored: unknown): string[] | null {
   return Array.isArray(stored) && stored.every((v) => typeof v === "string")
@@ -44,8 +50,15 @@ export function Dashboard({
   )
   const collapsed = React.useMemo(() => new Set(collapsedIds), [collapsedIds])
 
+  const [tagsCollapsed, setTagsCollapsed] = useStoredState(
+    "glyph.tagsCollapsed",
+    false,
+    parseFlag
+  )
+
   const [renaming, setRenaming] = React.useState<Deck | null>(null)
   const [deleting, setDeleting] = React.useState<Deck | null>(null)
+  useScrollRestore(renaming !== null || deleting !== null)
 
   if (!data) {
     return (
@@ -81,6 +94,27 @@ export function Dashboard({
       : (data.topics.get(renaming.parentId) ?? [])
     : []
 
+  if (renaming) {
+    return (
+      <RenameDeckPage
+        key={renaming.id}
+        deck={renaming}
+        siblings={siblings}
+        onClose={() => setRenaming(null)}
+      />
+    )
+  }
+  if (deleting) {
+    return (
+      <DeleteDeckPage
+        key={deleting.id}
+        deck={deleting}
+        topicCount={data.topics.get(deleting.id)?.length ?? 0}
+        onClose={() => setDeleting(null)}
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4 py-4">
       <DeckTree
@@ -99,15 +133,12 @@ export function Dashboard({
         onDelete={setDeleting}
       />
 
-      <RenameDeckDialog
-        deck={renaming}
-        siblings={siblings}
-        onClose={() => setRenaming(null)}
-      />
-      <DeleteDeckDialog
-        deck={deleting}
-        topicCount={deleting ? (data.topics.get(deleting.id)?.length ?? 0) : 0}
-        onClose={() => setDeleting(null)}
+      <TagList
+        tags={data.tags}
+        collapsed={tagsCollapsed}
+        onToggle={() => setTagsCollapsed(!tagsCollapsed)}
+        onStudy={onStudy}
+        onBrowse={onBrowse}
       />
     </div>
   )

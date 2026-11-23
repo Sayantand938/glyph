@@ -33,11 +33,56 @@ function StateBadge({ state }: { state: number }) {
 
 const cell = "px-1.5 py-2 align-middle"
 
+const MAX_CHIPS = 3
+
+/** Up to three tags as small buttons that filter the list; the rest as "+n". */
+function TagChips({
+  tags,
+  active,
+  onTag,
+}: {
+  tags: readonly string[]
+  active: readonly string[]
+  onTag: (tag: string) => void
+}) {
+  if (tags.length === 0) {
+    return <span className="text-xs text-muted-foreground">-</span>
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.slice(0, MAX_CHIPS).map((tag) => (
+        <button
+          key={tag}
+          type="button"
+          aria-pressed={active.includes(tag)}
+          title={`Filter by ${tag}`}
+          onClick={() => onTag(tag)}
+          className={`max-w-28 truncate rounded border px-1 text-[0.7rem] leading-4 hover:bg-muted ${
+            active.includes(tag) ? "border-foreground" : "text-muted-foreground"
+          }`}
+        >
+          {tag}
+        </button>
+      ))}
+      {tags.length > MAX_CHIPS && (
+        <span
+          className="text-[0.7rem] leading-4 text-muted-foreground"
+          title={tags.slice(MAX_CHIPS).join(", ")}
+        >
+          +{tags.length - MAX_CHIPS}
+        </span>
+      )}
+    </span>
+  )
+}
+
 /** One question as a table row. Edit, Copy and Delete live in the Actions menu. */
 export function BrowseListRow({
   row,
   where,
   now,
+  activeTags,
+  onTag,
   onEdit,
   onCopy,
   onDelete,
@@ -46,6 +91,10 @@ export function BrowseListRow({
   /** "Physics > Mechanics" for a mixed list, the topic name inside one Subject or Topic. */
   where: string
   now: number
+  /** Tags currently used as a filter, shown highlighted. */
+  activeTags: readonly string[]
+  /** A tag chip was clicked: toggle it as a filter. */
+  onTag: (tag: string) => void
   onEdit: (id: string) => void
   onCopy: (id: string) => void
   onDelete: (id: string) => void
@@ -62,6 +111,9 @@ export function BrowseListRow({
       </td>
       <td className={`${cell} text-xs whitespace-nowrap text-muted-foreground`}>
         {where}
+      </td>
+      <td className={`${cell} max-w-44`}>
+        <TagChips tags={row.tags} active={activeTags} onTag={onTag} />
       </td>
       <td className={cell}>
         <StateBadge state={row.state} />

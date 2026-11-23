@@ -49,7 +49,8 @@ export function useStudyRun(scope: StudyScope) {
           cards,
           now: currentTime(),
           seed,
-          mixed: scope.kind === "subject",
+          // A Subject or a tag mixes cards from several topics.
+          mixed: scope.kind !== "topic",
         })
         shownAt.current = currentTime()
         setRun({ queue, index: 0, phase: { kind: "question" }, history: [] })

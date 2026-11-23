@@ -17,6 +17,7 @@ import {
   MAX_RETENTION,
   MIN_RETENTION,
 } from "@/db/scheduler"
+import { useHistoryLayer } from "@/hooks/use-history-layer"
 import { useRetention } from "@/hooks/use-retention"
 import { useTheme, type Theme } from "@/hooks/use-theme"
 import { version } from "../../package.json"
@@ -68,6 +69,7 @@ export function SettingsPage({
   onImportBackup: () => void
 }) {
   const { theme, setTheme } = useTheme()
+  useHistoryLayer(onBack)
   const [retention, setRetention] = useRetention()
 
   return (

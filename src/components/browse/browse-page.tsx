@@ -7,11 +7,13 @@ import {
   SearchIcon,
 } from "lucide-react"
 
-import { DeleteNoteDialog } from "@/components/delete-note-dialog"
+import { DeleteNotePage } from "@/components/delete-note-page"
 import type { StudyScope } from "@/components/deck-tree"
-import { EditNoteModal } from "@/components/edit-note-modal"
+import { EditNotePage } from "@/components/edit-note-page"
 import { Button } from "@/components/ui/button"
 import { loadBrowseItems } from "@/db/queries"
+import { useHistoryLayer } from "@/hooks/use-history-layer"
+import { useScrollRestore } from "@/hooks/use-scroll-restore"
 import {
   BROWSE_FILTERS,
   defaultDirection,
@@ -23,6 +25,7 @@ import {
   type BrowseSort,
   type SortDirection,
 } from "@/lib/browse"
+import { tagCounts } from "@/lib/tags"
 
 import { BrowseListRow } from "./browse-row"
 import { copyText } from "./copy-text"
@@ -38,6 +41,7 @@ const COLUMNS: { label: string; sort: BrowseSort; align?: "right" }[] = [
   { label: "No.", sort: "number" },
   { label: "Question", sort: "question" },
   { label: "Topic", sort: "topic" },
+  { label: "Tags", sort: "tags" },
   { label: "State", sort: "state" },
   { label: "Due", sort: "due" },
   { label: "Reps", sort: "reps", align: "right" },
@@ -90,7 +94,8 @@ function SortHeader({
  * Browse the questions of a Subject, a Topic or everything (`scope` null):
  * search, filter by state, sort by any column, and edit or delete a question
  * (or copy it as JSON) from its Actions menu. The table scrolls sideways on narrow screens. Rows
- * are read live; the editor and delete dialog do the writes.
+ * are read live; editing and deleting open as full pages in place of the list
+ * (which keeps its search, filters and scroll position).
  */
 export function BrowsePage({
   scope,
@@ -99,6 +104,8 @@ export function BrowsePage({
   scope: StudyScope | null
   onBack: () => void
 }) {
+  useHistoryLayer(onBack)
+
   // Re-read every minute so due labels and the Due filter stay current.
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
@@ -120,6 +127,7 @@ export function BrowsePage({
   const [filter, setFilter] = React.useState<BrowseFilter>("all")
   const [sort, setSort] = React.useState<BrowseSort>("number")
   const [direction, setDirection] = React.useState<SortDirection>("asc")
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([])
   const [limit, setLimit] = React.useState(PAGE_SIZE)
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
@@ -140,11 +148,34 @@ export function BrowsePage({
     () => new Map((items ?? []).map((i) => [i.note.id, i.note])),
     [items]
   )
+  const editingNote = editingId ? (notes.get(editingId) ?? null) : null
+  const deletingNote = deletingId ? (notes.get(deletingId) ?? null) : null
+  useScrollRestore(editingNote !== null || deletingNote !== null)
   const counts = React.useMemo(() => filterCounts(rows, now), [rows, now])
-  const shown = React.useMemo(
-    () => sortRows(filterRows(rows, { query, filter }, now), sort, direction),
-    [rows, query, filter, now, sort, direction]
+  const tags = React.useMemo(() => tagCounts(rows.map((r) => r.tags)), [rows])
+  // A selected tag that no question carries any more (edited away) is ignored.
+  const activeTags = React.useMemo(
+    () => selectedTags.filter((t) => tags.some((x) => x.tag === t)),
+    [selectedTags, tags]
   )
+  const shown = React.useMemo(
+    () =>
+      sortRows(
+        filterRows(rows, { query, filter, tags: activeTags }, now),
+        sort,
+        direction
+      ),
+    [rows, query, filter, activeTags, now, sort, direction]
+  )
+
+  function toggleTag(tag: string) {
+    setSelectedTags((current) =>
+      current.includes(tag)
+        ? current.filter((t) => t !== tag)
+        : [...current, tag]
+    )
+    setLimit(PAGE_SIZE)
+  }
 
   function chooseSort(next: BrowseSort) {
     if (next === sort) {
@@ -171,11 +202,32 @@ export function BrowsePage({
   }
 
   // Inside one Subject or Topic the Subject name is redundant.
+  // A tag list spans decks, so it shows the full path like the all-questions list.
   const where = (rowSubject: string, rowTopic: string): string =>
-    scope ? rowTopic : `${rowSubject} > ${rowTopic}`
+    scope && scope.kind !== "tag" ? rowTopic : `${rowSubject} > ${rowTopic}`
+
+  if (editingNote) {
+    return (
+      <EditNotePage
+        key={editingNote.id}
+        note={editingNote}
+        onClose={() => setEditingId(null)}
+      />
+    )
+  }
+  if (deletingNote) {
+    return (
+      <DeleteNotePage
+        key={deletingNote.id}
+        note={deletingNote}
+        onClose={() => setDeletingId(null)}
+      />
+    )
+  }
 
   const title = scope ? scope.name : "All questions"
-  const filtering = query.trim() !== "" || filter !== "all"
+  const filtering =
+    query.trim() !== "" || filter !== "all" || activeTags.length > 0
 
   return (
     <div className="flex flex-col gap-3 py-4">
@@ -262,11 +314,39 @@ export function BrowsePage({
             ))}
           </div>
 
+          {tags.length > 0 && (
+            <div
+              role="group"
+              aria-label="Filter by tag"
+              className="-mx-1 flex [scrollbar-width:none] items-center gap-1.5 overflow-x-auto px-1 pb-1 [&::-webkit-scrollbar]:hidden"
+            >
+              <span className="shrink-0 text-xs text-muted-foreground">
+                Tags
+              </span>
+              {tags.map(({ tag, count }) => {
+                const on = activeTags.includes(tag)
+                return (
+                  <Button
+                    key={tag}
+                    variant={on ? "default" : "outline"}
+                    size="sm"
+                    className="shrink-0"
+                    aria-pressed={on}
+                    onClick={() => toggleTag(tag)}
+                  >
+                    {tag}
+                    <span className="tabular-nums opacity-70">{count}</span>
+                  </Button>
+                )
+              })}
+            </div>
+          )}
+
           {shown.length === 0 ? (
             <div className="flex flex-col items-start gap-2 py-4 text-sm">
               <p className="text-muted-foreground">
                 No questions match
-                {query.trim() ? ` "${query.trim()}"` : " this filter"}.
+                {query.trim() ? ` "${query.trim()}"` : " these filters"}.
               </p>
               <Button
                 variant="outline"
@@ -274,15 +354,16 @@ export function BrowsePage({
                 onClick={() => {
                   setQuery("")
                   setFilter("all")
+                  setSelectedTags([])
                 }}
               >
-                Clear search and filter
+                Clear search and filters
               </Button>
             </div>
           ) : (
             <>
               <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[52rem] border-collapse text-left">
+                <table className="w-full min-w-[60rem] border-collapse text-left">
                   <thead className="border-b text-[0.7rem] text-muted-foreground">
                     <tr>
                       {COLUMNS.map(({ label, sort: key, align }) => (
@@ -311,6 +392,8 @@ export function BrowsePage({
                         row={row}
                         where={where(row.subjectName, row.topicName)}
                         now={now}
+                        activeTags={activeTags}
+                        onTag={toggleTag}
                         onEdit={setEditingId}
                         onCopy={(id) => void copyQuestion(id)}
                         onDelete={setDeletingId}
@@ -334,15 +417,6 @@ export function BrowsePage({
           )}
         </>
       )}
-
-      <EditNoteModal
-        note={editingId ? (notes.get(editingId) ?? null) : null}
-        onClose={() => setEditingId(null)}
-      />
-      <DeleteNoteDialog
-        note={deletingId ? (notes.get(deletingId) ?? null) : null}
-        onClose={() => setDeletingId(null)}
-      />
     </div>
   )
 }

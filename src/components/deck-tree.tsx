@@ -24,14 +24,15 @@ import {
 } from "@/lib/queue"
 
 export interface StudyScope {
-  kind: "subject" | "topic"
+  /** A tag spans every deck: `id` is then the tag itself and `name` is "#tag". */
+  kind: "subject" | "topic" | "tag"
   id: string
   name: string
 }
 
-const cell = "w-9 shrink-0 text-right tabular-nums"
+export const cell = "w-9 shrink-0 text-right tabular-nums"
 
-function CountCells({ counts }: { counts: DeckCounts }) {
+export function CountCells({ counts }: { counts: DeckCounts }) {
   const show = (n: number) => (
     <span className={n === 0 ? "text-muted-foreground/60" : "font-semibold"}>
       {n}

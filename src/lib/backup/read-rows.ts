@@ -4,6 +4,7 @@
  */
 import type { BackupImage, CardRow, Deck, Note, RevlogRow } from "@/db/types"
 import { IMAGE_ID_RE, isImageMime, looksLikeBase64 } from "@/lib/image"
+import { parseTags } from "@/lib/tags"
 
 export type Rec = Record<string, unknown>
 
@@ -52,6 +53,10 @@ export function readNote(v: unknown): Note | null {
   if (!Array.isArray(o) || o.length !== 4 || !o.every(isStr)) return null
   if (!isIntIn(v.correctIndex, 0, 3)) return null
   if (!isNum(v.contentUpdatedAt) || !isNullableTime(v.deletedAt)) return null
+  // Absent in schema version 1 and 2 files; when present it must be a list of text.
+  if (v.tags !== undefined && !(Array.isArray(v.tags) && v.tags.every(isStr))) {
+    return null
+  }
   return {
     id: v.id,
     topicId: v.topicId,
@@ -60,6 +65,7 @@ export function readNote(v: unknown): Note | null {
     options: [o[0], o[1], o[2], o[3]],
     correctIndex: v.correctIndex as Note["correctIndex"],
     extra: v.extra,
+    tags: v.tags === undefined ? [] : parseTags(v.tags),
     contentUpdatedAt: v.contentUpdatedAt,
     deletedAt: v.deletedAt,
   }

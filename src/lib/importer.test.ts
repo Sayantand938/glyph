@@ -140,6 +140,92 @@ describe("validateRows", () => {
   })
 })
 
+describe("validateRows: tags", () => {
+  it("leaves tags undefined when the row has no tags key", () => {
+    const [r] = valid([row()])
+    expect("tags" in r).toBe(false)
+  })
+
+  it("accepts a list, normalizing, deduplicating and sorting", () => {
+    const [r] = valid([
+      row({ tags: ["Physics", "#exam", "exam", "Organic Chem"] }),
+    ])
+    expect(r.tags).toEqual(["exam", "organic-chem", "physics"])
+  })
+
+  it("accepts one string split on commas and spaces", () => {
+    const [r] = valid([row({ tags: "b, a  c" })])
+    expect(r.tags).toEqual(["a", "b", "c"])
+  })
+
+  it("reads an empty list or string as no tags, and null as not given", () => {
+    expect(valid([row({ tags: [] })])[0].tags).toEqual([])
+    expect(valid([row({ tags: "" })])[0].tags).toEqual([])
+    expect("tags" in valid([row({ tags: null })])[0]).toBe(false)
+  })
+
+  it("rejects a tags value that is not a list or text", () => {
+    const { valid: ok, invalid } = validateRows([
+      row({ tags: 5 }),
+      row({ tags: { a: 1 } }),
+    ])
+    expect(ok).toEqual([])
+    expect(invalid).toHaveLength(2)
+    expect(invalid[0].reasons.join(" ")).toMatch(/tags/)
+  })
+
+  it("rejects a tag that is too long", () => {
+    const { invalid } = validateRows([row({ tags: ["x".repeat(100)] })])
+    expect(invalid[0].reasons.join(" ")).toMatch(/tags/)
+  })
+})
+
+describe("planImport: tags", () => {
+  const withTags = (tags?: unknown) =>
+    valid([row(tags === undefined ? {} : { tags })])
+
+  it("gives a new note its tags, or none", () => {
+    expect(
+      planImport(withTags(["a"]), TOPIC, new Map(), T0).toAdd[0].tags
+    ).toEqual(["a"])
+    expect(planImport(withTags(), TOPIC, new Map(), T0).toAdd[0].tags).toEqual(
+      []
+    )
+  })
+
+  it("updates a note whose tags changed, and counts the same tags as unchanged", () => {
+    const first = planImport(withTags(["a"]), TOPIC, new Map(), T0)
+    const stored = toMap(first.toAdd)
+
+    const same = planImport(withTags(["a"]), TOPIC, stored, T1)
+    expect(same.unchanged).toBe(1)
+    expect(same.toUpdate).toEqual([])
+
+    const changed = planImport(withTags(["a", "b"]), TOPIC, stored, T1)
+    expect(changed.toUpdate).toHaveLength(1)
+    expect(changed.toUpdate[0].tags).toEqual(["a", "b"])
+    expect(changed.toUpdate[0].contentUpdatedAt).toBe(T1)
+  })
+
+  it("replaces the tags with an empty list when the row says so", () => {
+    const first = planImport(withTags(["a"]), TOPIC, new Map(), T0)
+    const plan = planImport(withTags([]), TOPIC, toMap(first.toAdd), T1)
+    expect(plan.toUpdate[0].tags).toEqual([])
+  })
+
+  it("leaves the stored tags alone when the row has no tags key", () => {
+    const first = planImport(withTags(["a"]), TOPIC, new Map(), T0)
+    const stored = toMap(first.toAdd)
+
+    const same = planImport(withTags(), TOPIC, stored, T1)
+    expect(same.unchanged).toBe(1)
+
+    // Another field changing must not wipe the tags either.
+    const edited = planImport(valid([row({ extra: "new" })]), TOPIC, stored, T1)
+    expect(edited.toUpdate[0].tags).toEqual(["a"])
+  })
+})
+
 describe("planImport", () => {
   it("adds everything into an empty topic", () => {
     const plan = planImport(

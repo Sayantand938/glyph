@@ -16,6 +16,8 @@ export interface Note {
   options: [string, string, string, string]
   correctIndex: 0 | 1 | 2 | 3
   extra: string
+  /** Normalized, unique and sorted (see lib/tags.ts). Empty for an untagged note. */
+  tags: string[]
   contentUpdatedAt: number
   deletedAt: number | null
 }

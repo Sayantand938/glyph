@@ -21,6 +21,7 @@ export interface BrowseNote {
   question: string
   options: readonly string[]
   extra: string
+  tags: readonly string[]
 }
 
 /** The slice of a card row the browse list needs. */
@@ -42,7 +43,9 @@ export interface BrowseRow {
   sl: number | string
   /** One line of plain text for the list. */
   preview: string
-  /** Lowercased question, options and explanation, for search. */
+  /** The note's tags (normalized, sorted). */
+  tags: string[]
+  /** Lowercased question, options, explanation and tags, for search. */
   search: string
   state: number
   due: number
@@ -84,14 +87,15 @@ function withoutImages(text: string): string {
 
 /**
  * One question as pretty JSON, ready to paste into a chatbot:
- * `{ question, options: { A..D }, answer: "B", extra }`. `extra` is left out
- * when empty. Math and Markdown stay as typed; image tokens become "[image]".
+ * `{ question, options: { A..D }, answer: "B", extra, tags }`. `extra` and
+ * `tags` are left out when empty. Math and Markdown stay as typed; image tokens become "[image]".
  */
 export function noteAsJson(note: {
   question: string
   options: readonly string[]
   correctIndex: number
   extra: string
+  tags?: readonly string[]
 }): string {
   const options: Record<string, string> = {}
   note.options.forEach((text, i) => {
@@ -104,6 +108,7 @@ export function noteAsJson(note: {
   }
   const extra = withoutImages(note.extra).trim()
   if (extra) data.extra = extra
+  if (note.tags && note.tags.length > 0) data.tags = [...note.tags]
   return JSON.stringify(data, null, 2)
 }
 
@@ -122,7 +127,8 @@ export function makeBrowseRow(
     subjectName,
     sl: note.sl,
     preview: previewText(note.question),
-    search: [note.question, ...note.options, note.extra]
+    tags: [...note.tags],
+    search: [note.question, ...note.options, note.extra, ...note.tags]
       .join("\n")
       .toLowerCase(),
     state: progress.state,
@@ -187,15 +193,21 @@ export function searchTerms(query: string): string[] {
   return query.toLowerCase().split(/\s+/).filter(Boolean)
 }
 
+/**
+ * Rows that match the state filter, contain every search word, and carry
+ * every tag in `tags` (an exact tag match, not a text search).
+ */
 export function filterRows(
   rows: readonly BrowseRow[],
-  options: { query: string; filter: BrowseFilter },
+  options: { query: string; filter: BrowseFilter; tags?: readonly string[] },
   now: number
 ): BrowseRow[] {
   const terms = searchTerms(options.query)
+  const tags = options.tags ?? []
   return rows.filter(
     (row) =>
       matchesFilter(row, options.filter, now) &&
+      tags.every((tag) => row.tags.includes(tag)) &&
       terms.every((term) => row.search.includes(term))
   )
 }
@@ -229,6 +241,7 @@ export type BrowseSort =
   | "number"
   | "question"
   | "topic"
+  | "tags"
   | "state"
   | "due"
   | "reps"
@@ -271,6 +284,8 @@ function compareBy(a: BrowseRow, b: BrowseRow, sort: BrowseSort): number {
         `${a.subjectName} > ${a.topicName}`,
         `${b.subjectName} > ${b.topicName}`
       )
+    case "tags":
+      return compareText(a.tags.join(" "), b.tags.join(" "))
     case "state":
       return a.state - b.state
     case "reps":

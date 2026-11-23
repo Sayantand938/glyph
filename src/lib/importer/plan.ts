@@ -1,5 +1,6 @@
 import type { Note } from "@/db/types"
 import { noteId } from "@/lib/hash"
+import { sameTags } from "@/lib/tags"
 
 import type { ImportPlan, ImportSummary, ValidRow } from "./types"
 
@@ -14,8 +15,9 @@ function sameOptions(a: readonly string[], b: readonly string[]): boolean {
  *  - Rows are keyed by `noteId(topicId, question)`; within the file the last
  *    row wins and the rest count as `duplicates`.
  *  - A stored note keeps its id and question text; only `sl`, `options`,
- *    `correctIndex` and `extra` are refreshed, and `contentUpdatedAt` is
- *    bumped only if something changed. A tombstoned note is resurrected
+ *    `correctIndex` and `extra` are refreshed (and `tags`, but only when the
+ *    row has a "tags" key), and `contentUpdatedAt` is bumped only if
+ *    something changed. A tombstoned note is resurrected
  *    (counts as updated and is bumped so it beats the tombstone in a merge).
  *  - Card rows are never part of the plan.
  */
@@ -51,6 +53,7 @@ export function planImport(
         options: row.options,
         correctIndex: row.correctIndex,
         extra: row.extra,
+        tags: row.tags ?? [],
         contentUpdatedAt: now,
         deletedAt: null,
       })
@@ -62,6 +65,7 @@ export function planImport(
       stored.sl !== row.sl ||
       stored.correctIndex !== row.correctIndex ||
       stored.extra !== row.extra ||
+      (row.tags !== undefined && !sameTags(stored.tags, row.tags)) ||
       !sameOptions(stored.options, row.options)
 
     if (!changed) {
@@ -74,6 +78,7 @@ export function planImport(
       options: row.options,
       correctIndex: row.correctIndex,
       extra: row.extra,
+      tags: row.tags ?? stored.tags,
       contentUpdatedAt: now,
       deletedAt: null,
     })

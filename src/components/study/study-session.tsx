@@ -1,12 +1,13 @@
 import * as React from "react"
 
-import { DeleteNoteDialog } from "@/components/delete-note-dialog"
-import { EditNoteModal } from "@/components/edit-note-modal"
+import { DeleteNotePage } from "@/components/delete-note-page"
+import { EditNotePage } from "@/components/edit-note-page"
 import { Button } from "@/components/ui/button"
+import { useHistoryLayer } from "@/hooks/use-history-layer"
 
 import type { StudyScope } from "../deck-tree"
 import { EmptyState, FinishedState, GoneState } from "./end-states"
-import { ExitDialog } from "./exit-dialog"
+import { ExitPage } from "./exit-page"
 import { hintFor } from "./helpers"
 import { QuestionView } from "./question-view"
 import { SessionToolbar } from "./session-toolbar"
@@ -26,10 +27,19 @@ export function StudySession({
   const [deleting, setDeleting] = React.useState(false)
   const [confirmExit, setConfirmExit] = React.useState(false)
 
-  function requestExit() {
-    if (!run || s.empty || s.finished) onExit()
-    else setConfirmExit(true)
+  /** Leaves at once when nothing is in progress; otherwise asks first. */
+  function requestExit(): boolean {
+    if (!run || s.empty || s.finished) {
+      onExit()
+      return true
+    }
+    setConfirmExit(true)
+    return false
   }
+
+  // Back asks before leaving a session in progress (the prompt is its own
+  // page, which Back then dismisses).
+  useHistoryLayer(requestExit)
 
   useStudyKeys({
     active: run !== null && !editing && !deleting && !confirmExit,
@@ -64,6 +74,34 @@ export function StudySession({
         Loading...
       </p>
     )
+  }
+
+  // Editing, deleting and the leave prompt are full pages in place of the
+  // session. This component (and so the run's state) stays mounted behind them.
+  if (editing && data) {
+    return (
+      <EditNotePage
+        key={data.note.id}
+        note={data.note}
+        onClose={() => setEditing(false)}
+        onSaved={(note, resetFsrs) => {
+          if (resetFsrs) s.disableUndoFor(note.id)
+        }}
+      />
+    )
+  }
+  if (deleting && data) {
+    return (
+      <DeleteNotePage
+        key={data.note.id}
+        note={data.note}
+        onClose={() => setDeleting(false)}
+        onDeleted={(note) => s.dropDeleted(note.id)}
+      />
+    )
+  }
+  if (confirmExit) {
+    return <ExitPage onStay={() => setConfirmExit(false)} onLeave={onExit} />
   }
 
   const counter = s.empty
@@ -119,26 +157,6 @@ export function StudySession({
           {hintFor(run.phase.kind)}
         </p>
       )}
-
-      <EditNoteModal
-        note={editing && data ? data.note : null}
-        onClose={() => setEditing(false)}
-        onSaved={(note, resetFsrs) => {
-          if (resetFsrs) s.disableUndoFor(note.id)
-        }}
-      />
-
-      <DeleteNoteDialog
-        note={deleting && data ? data.note : null}
-        onClose={() => setDeleting(false)}
-        onDeleted={(note) => s.dropDeleted(note.id)}
-      />
-
-      <ExitDialog
-        open={confirmExit}
-        onOpenChange={setConfirmExit}
-        onLeave={onExit}
-      />
     </div>
   )
 }

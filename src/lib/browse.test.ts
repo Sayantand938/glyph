@@ -31,6 +31,7 @@ function note(over: Partial<BrowseNote> = {}): BrowseNote {
     question: "What is the SI unit of force?",
     options: ["Newton", "Joule", "Watt", "Pascal"],
     extra: "Named after Isaac Newton.",
+    tags: [],
     ...over,
   }
 }
@@ -148,6 +149,52 @@ describe("searchTerms and filterRows", () => {
         (r) => r.id
       )
     ).toEqual(["a"])
+  })
+})
+
+describe("tags in browse", () => {
+  const rows = [
+    row({ id: "a", question: "Alpha", tags: ["exam", "physics"] }),
+    row({ id: "b", question: "Bravo", tags: ["physics"] }),
+    row({ id: "c", question: "Charlie", tags: [] }),
+  ]
+  const ids = (tags: string[], query = "") =>
+    filterRows(rows, { query, filter: "all", tags }, NOW).map((r) => r.id)
+
+  it("copies the tags and searches them as text", () => {
+    expect(rows[0].tags).toEqual(["exam", "physics"])
+    expect(rows[0].search).toContain("exam")
+    expect(ids([], "exam")).toEqual(["a"])
+  })
+
+  it("keeps the row's tags independent of the note's array", () => {
+    const tags = ["x"]
+    const r = row({ tags })
+    tags.push("y")
+    expect(r.tags).toEqual(["x"])
+  })
+
+  it("filters by tag, needing every selected tag", () => {
+    expect(ids([])).toEqual(["a", "b", "c"])
+    expect(ids(["physics"])).toEqual(["a", "b"])
+    expect(ids(["physics", "exam"])).toEqual(["a"])
+    expect(ids(["nope"])).toEqual([])
+  })
+
+  it("matches a tag exactly, not as a substring", () => {
+    expect(ids(["phys"])).toEqual([])
+  })
+
+  it("combines the tag filter with search", () => {
+    expect(ids(["physics"], "bravo")).toEqual(["b"])
+  })
+
+  it("sorts by tags, untagged first", () => {
+    expect(sortRows(rows, "tags", "asc").map((r) => r.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ])
   })
 })
 
@@ -352,6 +399,28 @@ describe("labels", () => {
     expect(at(2, NOW + 9 * DAY)).toBe("in 9d")
     expect(at(2, NOW + 60 * DAY)).toBe("in 2mo")
     expect(at(2, NOW + 400 * DAY)).toBe("in 1.1y")
+  })
+})
+
+describe("noteAsJson with tags", () => {
+  const base = {
+    question: "Q",
+    options: ["a", "b", "c", "d"],
+    correctIndex: 0,
+    extra: "",
+  }
+
+  it("adds the tags after the other fields when there are some", () => {
+    const text = noteAsJson({ ...base, tags: ["exam", "physics"] })
+    expect(JSON.parse(text).tags).toEqual(["exam", "physics"])
+    expect(Object.keys(JSON.parse(text)).at(-1)).toBe("tags")
+  })
+
+  it("leaves them out when empty or missing", () => {
+    expect(JSON.parse(noteAsJson({ ...base, tags: [] }))).not.toHaveProperty(
+      "tags"
+    )
+    expect(JSON.parse(noteAsJson(base))).not.toHaveProperty("tags")
   })
 })
 
