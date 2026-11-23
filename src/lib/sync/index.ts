@@ -58,6 +58,21 @@ export {
   type SyncProgress,
 } from "./session"
 export {
+  NearbyInitiator,
+  NearbyResponder,
+  encodeNearby,
+  parseNearby,
+  parseTrusted,
+  randomPin,
+  webCrypto,
+  withTrusted,
+  withoutTrusted,
+  type NearbyMsg,
+  type Request as NearbyRequest,
+  type TrustedDevice,
+  type TrustedDevices,
+} from "./nearby"
+export {
   analyzeSdp,
   classifyAddress,
   codeWarning,

@@ -1,8 +1,10 @@
+mod discovery;
 mod sql;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(discovery::Discovery::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -19,7 +21,12 @@ pub fn run() {
       sql::sql_select,
       sql::sql_execute,
       sql::sql_execute_many,
-      sql::sql_script
+      sql::sql_script,
+      discovery::discovery_start,
+      discovery::discovery_stop,
+      discovery::discovery_connect,
+      discovery::discovery_send,
+      discovery::discovery_close
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");

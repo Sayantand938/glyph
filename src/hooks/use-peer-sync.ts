@@ -85,7 +85,7 @@ const MARKS_KEY = "glyph.syncMarks"
 
 /** A random id for this device, kept in localStorage (in memory if that fails). */
 let memoryDeviceId: string | null = null
-function deviceId(): string {
+export function deviceId(): string {
   try {
     let id = localStorage.getItem(DEVICE_KEY)
     if (!id) {
