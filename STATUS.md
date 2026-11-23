@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. The Next.js → Vite migration is complete.
+**Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 336 tests pass; typecheck, lint and build are clean. The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -87,7 +87,7 @@ Question text, option text and the explanation can contain pasted images. **The 
 
 ### Browse and delete questions (after Phase 7)
 
-A browse page for every question, plus deleting a single question. The Anki-style list is deliberately small: search, state filters, sort, tap to edit, delete. Query syntax, bulk select, move and suspend are not built.
+A browse page for every question, plus deleting a single question. The Anki-style list is deliberately small: search, state filters, sort, tap to edit, delete. Query syntax, bulk select and move are not built. Suspend, bury and flag were added later (see "Suspend, bury and flag").
 
 - **Entry points.** A "Browse" item in each Subject/Topic row's menu on the dashboard (scoped to that deck), and a list icon in the header next to the gear ("All questions"). `App.tsx` has a `browsing` view state (`{ scope: StudyScope | null }`), like `settingsOpen`; there is no router.
 - **Reads.** `loadBrowseItems(scope)` in `db/queries.ts` returns every live note in live Topics under live Subjects with its card (`{ row, note }`), read with `useLiveQuery`, so edits and deletes show up at once. Everything is loaded and filtered in JS (a few thousand rows is fine), and the page shows 100 rows at a time with a "Show more" button; there is no virtual list, so no new dependency.
@@ -111,6 +111,10 @@ Anki-style tags on questions: a flat list per note, set in the editor or the imp
 - **Dashboard and study.** A collapsible "Tags (n)" section under the deck tree (`components/tag-list.tsx`, collapse state in `glyph.tagsCollapsed`) lists every tag in use by a live question with New / Lrn / Due counts, a Study button and a Browse menu item. `StudyScope` gained `kind: "tag"` (`id` is the tag, `name` is `#tag`); a tag session is mixed like a Subject session (`mixed: scope.kind !== "topic"`). `db/queries.ts` has a shared `QueryScope`; `loadStudyCards` and `loadBrowseItems` read tag scopes through the `*tags` index, and `loadDashboard` returns `tags` (one index lookup per distinct tag). Tags that only deleted questions or deleted decks carry do not show.
 - **Verified in the browser** (dev server, an existing version-2 database): the upgrade left old notes with `tags: []`, importing the tagged sample file, the four tag rows and counts on the dashboard, Browse from a tag (scoped list, Tags column, chips with counts), editing a question's tags (typed text normalized, a suggestion appended, the new tags appear in the list and the chip bar), filtering by one tag, a tag study session (`#economics`, 16 cards across Subjects, mixed), and a backup export/parse round trip (version 3, tags equal). Not exercised: Import Backup of a version 2 file through the UI, deleting a question that carries tags, a very long tag list, a phone layout, and the production build offline.
 - **Not built:** hierarchical tags, renaming or merging a tag everywhere, bulk add/remove tags in Browse, a tag manager screen, an OR filter, and tag counts that exclude tags carried only by deleted notes in the editor's suggestions (they still appear there).
+
+### Settings data rows and session summary (after Phase 7)
+
+Settings > Data lists three full-width action rows (`DataAction` in `settings-page.tsx`) under Questions (Import questions) and Backup (Export backup, Restore backup), each with a one-line description. The end-of-session screen (`study/end-states.tsx`, `FinishedState`) shows an animated accuracy ring, a verdict line and stat tiles (cards, answers, time, average per answer) instead of a plain list; it takes the run's history and the scope name. Both were checked by typecheck, lint and the build, not exercised in the browser.
 
 ### Suspend, bury and flag (after Phase 7)
 
@@ -184,7 +188,8 @@ Pure restructuring, no behavior change. The four largest modules became director
 2. Install the production build as a PWA on a phone (Android and iOS) and repeat the offline check there; the manual test script's items 14-15 were only checked in the desktop browser pane.
 3. Images in the bulk JSON importer (see "Images in questions").
 4. Browse follow-ups if wanted: bulk select (delete, move, reset), moving a question to another topic, Anki-style query syntax (`is:due prop:lapses>3`) and "study these results" (suspend and flags are done, see "Suspend, bury and flag").
-5. Items from "Nice-to-Haves" in section 12, if wanted.
+5. Try suspend / bury / flag on a real phone and with Ctrl+digit in Firefox and Safari (only the in-app browser was used), and exercise the Browse row's flag and Bury items and a backup round trip through the UI.
+6. Items from "Nice-to-Haves" in section 12, if wanted.
 
 ---
 
