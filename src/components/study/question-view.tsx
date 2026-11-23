@@ -1,4 +1,5 @@
 import { OptionButton, type OptionStatus } from "@/components/option-button"
+import { RichText } from "@/components/rich-text"
 import { Button } from "@/components/ui/button"
 import type { StudyCardView } from "@/db/queries"
 import { Rating, type Grade, type previewIntervals } from "@/db/scheduler"
@@ -40,7 +41,7 @@ export function QuestionView({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-base font-medium break-words whitespace-pre-wrap">
-        {data.note.question}
+        <RichText text={data.note.question} />
       </p>
 
       <div className="flex flex-col gap-2" role="group" aria-label="Options">
@@ -61,7 +62,7 @@ export function QuestionView({
           className="rounded-lg border bg-muted/40 p-3 text-sm break-words whitespace-pre-wrap"
           aria-live="polite"
         >
-          {data.note.extra}
+          <RichText text={data.note.extra} />
         </div>
       )}
 

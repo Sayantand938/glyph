@@ -41,6 +41,31 @@ The header's Import JSON / Export Backup / Import Backup buttons and menu (`head
 
 Settings > Scheduling has a Desired retention slider (70-97%, default 85%, was ts-fsrs's 90%) and a reset button. The value is a per-device preference in localStorage (`glyph.retention`, via `hooks/use-retention.ts`), like the theme, so it is not part of backups and does not sync. `db/scheduler.ts` keeps one `fsrs` instance per retention value (`schedulerFor`) and `grade`, `previewIntervals` and `applyReview` take a trailing `retention` argument that defaults to `DEFAULT_RETENTION`; `use-study-run.ts` passes the stored value. It affects only future reviews; existing due dates are not recomputed. The `src/sim/` runs use the 85% default.
 
+### Scheduling check and due rule (after Phase 7)
+
+`src/sim/` (`simulate.ts`, `year.test.ts`) runs the real `grade`, `buildQueue` and re-queue code against a simulated learner (exponential forgetting, a different model from FSRS) for a year on `sample-data/capitals-and-currencies.json` (30 questions), plus 300-card, vacation, weak/strong-learner and lazy-rating scenarios. It checks scheduler invariants every review and sweeps 30 seeds. Set `SIM_REPORT=<file>` to write the full report. Result: no violations, retention 86-91% against the 90% target, about 18 answers per card per year.
+
+It found that `due <= now` made every Review card about 0.6 days late for someone who studies at a similar time each day. `countCards` and `buildQueue` now treat a Review card as due when it is due any time before the end of the local day (`endOfLocalDay` in `lib/queue.ts`); Learning/Relearning keep the exact-time check. Effect over 30 seeds (average learner): retention 87.3% -> 89.0%, lapses per card 1.73 -> 1.46, mean lateness 0.59 -> 0 days; weak learner 82.1% -> 86.3%. Known and left alone: a new card needs two sessions to reach Review (the queue is built once per session), and rating a lucky guess Good costs about 6 points of retention.
+
+### LaTeX in questions (after Phase 7)
+
+Question text, option text and the explanation (`extra`) now render LaTeX with KaTeX. Four delimiter forms are always accepted: `$...$` and `$$...$$`, and `\(...\)` and `\[...\]`. `$...$` is the default, i.e. the form to use in docs and sample data (`sample-data/math-sample.json` exercises all four); there is no setting to turn any of them off.
+
+- `src/lib/math.ts` (`splitMath`, pure, 16 tests in `math.test.ts`) splits text into text/math segments. Because `$` is also a currency sign, inline `$...$` follows the Pandoc rules: the opening `$` must be followed by a non-space, the closing `$` must follow a non-space and not be followed by a digit, so "costs $5 or $10" stays text. `\$` is a literal dollar sign; unclosed, empty or blank-line-spanning spans stay as plain text.
+- `src/components/rich-text.tsx` (`RichText`) renders the segments; math is drawn by `katex.render` into a ref (not `dangerouslySetInnerHTML`, rule 10), with `throwOnError: false`, `trust: false`, `strict: "ignore"` and a fallback to the raw text if KaTeX throws. Used in `question-view.tsx` and `option-button.tsx`.
+- Stored note text is unchanged (still the raw string with delimiters), so hashing, `noteId`, import, backup and the editor are unaffected. The edit modal and import preview show the raw text, not rendered math.
+- New dependency (rule 8): `katex` (+ `@types/katex` dev), the only practical offline renderer with no network calls. Its CSS and fonts are bundled by Vite; the woff2 fonts are in the service-worker precache (18 -> 37 entries, ~1.2 MB), so math works offline. The JS bundle grew to ~850 kB (270 kB gzip); code-splitting KaTeX is possible if that matters.
+- Verified in the browser (dev server): all four delimiters in question, options and explanation, currency text left alone, `\$` escape, display math centred, no console errors. Not exercised: the production build offline, a real phone, or very wide display formulas on a narrow screen (display math scrolls horizontally).
+
+### Markdown in questions (after Phase 7)
+
+Question text, option text and the explanation now render a small Markdown subset on top of the LaTeX support: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `` `inline code` ``, fenced code blocks, `#` headings (levels 4-6 render as level 3), `-`/`*`/`+` and `1.` lists (flat, no nesting), and `>` quotes. Links, images, tables and raw HTML are deliberately not supported. No new dependency: `src/lib/markdown.ts` (`parseMarkdown`, pure, 20 tests in `markdown.test.ts`) is a hand-written parser that returns plain data, and `RichText` turns it into React elements (rule 10 still holds; there is no HTML string anywhere).
+
+- Math and code are cut out first, so `$a_1 * b_2$` is never read as emphasis, `$` inside code stays a dollar sign, and `**value $x$**` works. Display math (`$$`/`\[`) is not broken by lines that look like list or heading syntax.
+- Safe for ordinary quiz text: `2 * 3 * 4`, `snake_case`, `C#`, `#hashtag` and "costs $5 or $10" stay plain. `\*` escapes an asterisk.
+- Text with no block structure renders as a bare fragment exactly as before, so existing notes look the same. Multi-block text becomes stacked `<span>`s, because `RichText` is also used inside a `<button>` (option text), where `p`/`ul`/`pre` are not allowed.
+- Stored text is unchanged, so hashing, `noteId`, import, backup and the editor are unaffected. The edit modal and import preview still show raw text. `sample-data/markdown-sample.json` exercises it.
+
 ### Refactor: smaller files (after Phase 7)
 
 Pure restructuring, no behavior change. The four largest modules became directories; import paths for `@/lib/backup`, `@/lib/importer` and `@/db/repo` are unchanged (barrel `index.ts`). Phase notes below still name the old single files.
@@ -464,3 +489,5 @@ Cloud sync, accounts, images/rich text in questions, per-deck FSRS parameter tun
 ## 12. Nice-to-Haves (only after all checkpoints pass)
 
 Stats screen (reviews per day, retention), per-deck daily limits, search/browse notes, CSV import, haptic feedback on mobile, FSRS parameter optimization from `revlog`.
+
+**Planned, not started:** a naming cleanup (Note -> Question, CardRow -> Progress, Revlog -> Review). See [RENAME_PLAN.md](RENAME_PLAN.md).

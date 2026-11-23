@@ -1,5 +1,7 @@
 import { CheckIcon, XIcon } from "lucide-react"
 
+import { RichText } from "@/components/rich-text"
+
 export type OptionStatus =
   /** Not answered yet. */
   | "idle"
@@ -53,7 +55,7 @@ export function OptionButton({
         {label}
       </span>
       <span className="min-w-0 flex-1 text-sm break-words whitespace-pre-wrap">
-        {text}
+        <RichText text={text} />
       </span>
       {status === "correct" && (
         <>
