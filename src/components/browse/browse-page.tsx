@@ -7,6 +7,7 @@ import {
   SearchIcon,
 } from "lucide-react"
 
+import { CardHistoryPage } from "@/components/card-history-page"
 import { DeleteNotePage } from "@/components/delete-note-page"
 import type { StudyScope } from "@/components/deck-tree"
 import { EditNotePage } from "@/components/edit-note-page"
@@ -137,6 +138,7 @@ export function BrowsePage({
   const [limit, setLimit] = React.useState(PAGE_SIZE)
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
+  const [historyId, setHistoryId] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<{
     text: string
     error: boolean
@@ -156,7 +158,10 @@ export function BrowsePage({
   )
   const editingNote = editingId ? (notes.get(editingId) ?? null) : null
   const deletingNote = deletingId ? (notes.get(deletingId) ?? null) : null
-  useScrollRestore(editingNote !== null || deletingNote !== null)
+  const historyNote = historyId ? (notes.get(historyId) ?? null) : null
+  useScrollRestore(
+    editingNote !== null || deletingNote !== null || historyNote !== null
+  )
   const counts = React.useMemo(() => filterCounts(rows, now), [rows, now])
   const tags = React.useMemo(() => tagCounts(rows.map((r) => r.tags)), [rows])
   const flags = React.useMemo(() => flagCounts(rows), [rows])
@@ -277,6 +282,16 @@ export function BrowsePage({
         key={deletingNote.id}
         note={deletingNote}
         onClose={() => setDeletingId(null)}
+      />
+    )
+  }
+
+  if (historyNote) {
+    return (
+      <CardHistoryPage
+        key={historyNote.id}
+        note={historyNote}
+        onClose={() => setHistoryId(null)}
       />
     )
   }
@@ -485,6 +500,7 @@ export function BrowsePage({
                         activeTags={activeTags}
                         onTag={toggleTag}
                         onEdit={setEditingId}
+                        onHistory={setHistoryId}
                         onCopy={(id) => void copyQuestion(id)}
                         onDelete={setDeletingId}
                         onFlag={flagRow}

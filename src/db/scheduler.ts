@@ -215,18 +215,35 @@ export function previewIntervals(
   }
 }
 
+/** What the user did on the question, for the log (see `RevlogRow`). */
+export interface ReviewAnswer {
+  /** The picked option was the right one. */
+  correct: boolean
+  /** Time until the option was picked. */
+  answerMs: number
+}
+
+/**
+ * Without an `answer` (the simulation, tests) a pass counts as a right pick and
+ * the pick took the whole `durationMs`.
+ */
 export function grade(
   row: CardRow,
   rating: Grade,
   now: number,
   durationMs = 0,
   retention = DEFAULT_RETENTION,
-  weights?: Weights
+  weights?: Weights,
+  answer: ReviewAnswer = {
+    correct: rating === Rating.Good,
+    answerMs: durationMs,
+  }
 ): { row: CardRow; log: RevlogRow } {
   const { card: input, at, shift } = schedulerInput(row, now)
   const { card } = schedulerFor(retention, weights).next(input, at, rating)
+  const next = cardToRow(realCard(card, shift), row)
   return {
-    row: cardToRow(realCard(card, shift), row),
+    row: next,
     log: {
       id: crypto.randomUUID(),
       cardId: row.cardId,
@@ -234,6 +251,12 @@ export function grade(
       rating,
       state: row.state,
       durationMs,
+      answerMs: answer.answerMs,
+      correct: answer.correct,
+      stabilityAfter: next.stability,
+      difficultyAfter: next.difficulty,
+      scheduledDaysAfter: next.scheduledDays,
+      dueAfter: next.due,
     },
   }
 }

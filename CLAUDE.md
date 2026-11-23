@@ -36,7 +36,7 @@ src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn; study/ = study options page and study session; import/ = import page; browse/ = browse page; no modals, edit/confirm/import screens are full pages built on page-shell.tsx)
 src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/, session, browse, note-edit, tags, card-marks, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/, session, browse, note-edit, tags, card-marks, card-history, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only)
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```

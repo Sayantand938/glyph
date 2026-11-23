@@ -72,6 +72,12 @@ function log(id: string, over: Partial<RevlogRow> = {}): RevlogRow {
     rating: 3,
     state: 0,
     durationMs: 500,
+    answerMs: 400,
+    correct: true,
+    stabilityAfter: 2.5,
+    difficultyAfter: 5,
+    scheduledDaysAfter: 2,
+    dueAfter: 200,
     ...over,
   }
 }
@@ -695,5 +701,54 @@ describe("card marks in backups", () => {
     const result = mergeBackup(local, incoming)
     expect(result.write.cards).toEqual([])
     expect(result.merged.cards[0].flag).toBe(6)
+  })
+
+  describe("review log rows", () => {
+    it("round-trips complete rows", () => {
+      const withLog = data({ ...base, revlog: [log("r1", { correct: false })] })
+      const parsed = parseBackup(serializeBackup(exportBackup(withLog, 1)))
+      expect(parsed.ok && parsed.backup.revlog).toEqual([
+        log("r1", { correct: false }),
+      ])
+    })
+
+    it("skips the review rows of an older backup, keeping the rest", () => {
+      const file = exportBackup(data({ ...base, revlog: [log("r1")] }), 1)
+      const old = JSON.parse(serializeBackup(file)) as {
+        schemaVersion: number
+        revlog: Record<string, unknown>[]
+      }
+      old.schemaVersion = 4
+      for (const r of old.revlog) delete r.correct
+      const parsed = parseBackup(JSON.stringify(old))
+      expect(parsed.ok && parsed.backup.revlog).toEqual([])
+      expect(parsed.ok && parsed.backup.notes.length).toBe(base.notes.length)
+    })
+
+    it("rejects an incomplete or malformed row in a current file", () => {
+      const text = serializeBackup(
+        exportBackup(data({ ...base, revlog: [log("r1")] }), 1)
+      )
+      const withField = (key: string, value: unknown) => {
+        const dirty = JSON.parse(text) as { revlog: Record<string, unknown>[] }
+        if (value === undefined) delete dirty.revlog[0][key]
+        else dirty.revlog[0][key] = value
+        return parseBackup(JSON.stringify(dirty)).ok
+      }
+      for (const key of [
+        "answerMs",
+        "correct",
+        "stabilityAfter",
+        "difficultyAfter",
+        "scheduledDaysAfter",
+        "dueAfter",
+      ]) {
+        expect(withField(key, undefined)).toBe(false)
+      }
+      expect(withField("correct", 1)).toBe(false)
+      expect(withField("stabilityAfter", "x")).toBe(false)
+      expect(withField("dueAfter", null)).toBe(false)
+      expect(withField("correct", false)).toBe(true)
+    })
   })
 })

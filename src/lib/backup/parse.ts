@@ -1,4 +1,4 @@
-import type { BackupImage } from "@/db/types"
+import type { BackupImage, RevlogRow } from "@/db/types"
 
 import {
   isNum,
@@ -70,7 +70,13 @@ export function parseBackup(text: string): ParseBackupResult {
   if (!notes.ok) return notes
   const cards = readTable("cards", data.cards, readCard)
   if (!cards.ok) return cards
-  const revlog = readTable("revlog", data.revlog, readLog)
+  // Review rows before schema 5 lack the fields analytics needs (right/wrong,
+  // time to pick, state after), so they are not imported; the questions and the
+  // cards' progress still are. A file from 5 on must have complete rows.
+  const revlog =
+    version < 5
+      ? { ok: true as const, rows: [] as RevlogRow[] }
+      : readTable("revlog", data.revlog, readLog)
   if (!revlog.ok) return revlog
   // Absent in version 1 files; when present it must be valid.
   const images =

@@ -1,6 +1,7 @@
 import {
   CopyIcon,
   EllipsisVerticalIcon,
+  HistoryIcon,
   PencilIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -97,6 +98,7 @@ export function BrowseListRow({
   activeTags,
   onTag,
   onEdit,
+  onHistory,
   onCopy,
   onDelete,
   onFlag,
@@ -112,6 +114,8 @@ export function BrowseListRow({
   /** A tag chip was clicked: toggle it as a filter. */
   onTag: (tag: string) => void
   onEdit: (id: string) => void
+  /** Open the question's review history page. */
+  onHistory: (id: string) => void
   onCopy: (id: string) => void
   onDelete: (id: string) => void
   /** 0 clears the flag. */
@@ -183,6 +187,10 @@ export function BrowseListRow({
             <DropdownMenuItem onClick={() => onEdit(row.id)}>
               <PencilIcon aria-hidden />
               Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onHistory(row.id)}>
+              <HistoryIcon aria-hidden />
+              Review history
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onCopy(row.id)}>
               <CopyIcon aria-hidden />

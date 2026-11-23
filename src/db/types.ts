@@ -66,8 +66,30 @@ export interface RevlogRow {
   rating: number
   /** State BEFORE the review. */
   state: number
-  /** Time from card shown to rating. */
+  /**
+   * Time from card shown to rating. For a right pick this includes the time
+   * spent reading the explanation before pressing Pass or Fail.
+   */
   durationMs: number
+  /** Time from card shown to the option being picked (<= durationMs). */
+  answerMs: number
+  /**
+   * Whether the picked option was the right one. A right pick can still be
+   * rated Again (a guess), so this is not the same as `rating`. The picked
+   * option itself is deliberately not stored: an index goes stale when the
+   * note's options are edited.
+   */
+  correct: boolean
+  /**
+   * The card's memory state AFTER the review, so stability, difficulty and
+   * interval charts need no replay of the log (which would also change if the
+   * FSRS weights change).
+   */
+  stabilityAfter: number
+  difficultyAfter: number
+  scheduledDaysAfter: number
+  /** ms epoch the card became due after this review. */
+  dueAfter: number
 }
 
 /**

@@ -138,8 +138,19 @@ export function readImage(v: unknown): BackupImage | null {
 export function readLog(v: unknown): RevlogRow | null {
   if (!isRec(v)) return null
   if (!isStr(v.id) || v.id === "" || !isStr(v.cardId)) return null
-  if (!isNum(v.reviewedAt) || !isNum(v.durationMs)) return null
+  if (!isNum(v.reviewedAt) || !isNum(v.durationMs) || !isNum(v.answerMs)) {
+    return null
+  }
   if (!isIntIn(v.rating, 1, 4) || !isIntIn(v.state, 0, 3)) return null
+  if (typeof v.correct !== "boolean") return null
+  if (
+    !isNum(v.stabilityAfter) ||
+    !isNum(v.difficultyAfter) ||
+    !isNum(v.scheduledDaysAfter) ||
+    !isNum(v.dueAfter)
+  ) {
+    return null
+  }
   return {
     id: v.id,
     cardId: v.cardId,
@@ -147,5 +158,11 @@ export function readLog(v: unknown): RevlogRow | null {
     rating: v.rating,
     state: v.state,
     durationMs: v.durationMs,
+    answerMs: v.answerMs,
+    correct: v.correct,
+    stabilityAfter: v.stabilityAfter,
+    difficultyAfter: v.difficultyAfter,
+    scheduledDaysAfter: v.scheduledDaysAfter,
+    dueAfter: v.dueAfter,
   }
 }

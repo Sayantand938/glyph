@@ -6,7 +6,14 @@ import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
 import { db } from "./database"
-import type { BackupImage, CardRow, Deck, ImageRow, Note } from "./types"
+import type {
+  BackupImage,
+  CardRow,
+  Deck,
+  ImageRow,
+  Note,
+  RevlogRow,
+} from "./types"
 
 /**
  * What a study session or the browse list covers: one Subject, one Topic, or
@@ -199,6 +206,16 @@ export async function loadStudyCard(
     if (!note || note.deletedAt !== null) return null
     return { card, note }
   })
+}
+
+/** A card with every review of it (oldest first), for the History page. */
+export async function loadCardHistory(
+  cardId: string
+): Promise<{ card: CardRow | null; logs: RevlogRow[] }> {
+  return db.transaction("r", [db.cards, db.revlog], async () => ({
+    card: (await db.cards.get(cardId)) ?? null,
+    logs: await db.revlog.where("cardId").equals(cardId).sortBy("reviewedAt"),
+  }))
 }
 
 export interface ImageView {

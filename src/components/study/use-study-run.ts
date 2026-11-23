@@ -172,7 +172,9 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         Rating.Again,
         durationMs,
         retention,
-        weights ?? undefined
+        weights ?? undefined,
+        undefined,
+        { correct: false, answerMs: durationMs }
       )
       const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {
@@ -205,6 +207,7 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
     if (!run || !data || busy.current || run.phase.kind !== "right") return
     const current = run
     const view = data
+    const pickedAt = run.phase.pickedAt
     busy.current = true
     setMessage(null)
     setNotice(null)
@@ -215,7 +218,15 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
         rating,
         durationMs,
         retention,
-        weights ?? undefined
+        weights ?? undefined,
+        undefined,
+        {
+          correct: true,
+          answerMs: Math.min(
+            durationMs,
+            Math.max(0, pickedAt - shownAt.current)
+          ),
+        }
       )
       const failed = rating === Rating.Again
       const gap = requeueGap(seed, view.card.cardId, current.index)

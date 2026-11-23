@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie"
 
 import { marksOf, type CardMarks } from "@/lib/card-marks"
 
+import { emptyCardRow } from "./scheduler"
 import { seedIfEmpty } from "./seed"
 import type { CardRow, Deck, ImageRow, Note, RevlogRow } from "./types"
 
@@ -48,6 +49,26 @@ export class GlyphDB extends Dexie {
             Object.assign(card, marksOf(card))
           })
       )
+    // Review log with complete rows (right/wrong, time to pick, state after).
+    // Old rows can't be completed, so the log is cleared and every card goes
+    // back to New (marks kept); questions, decks and tags are untouched.
+    this.version(5)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx.table("revlog").clear()
+        const now = Date.now()
+        await tx
+          .table("cards")
+          .toCollection()
+          .modify((card: CardRow) => {
+            Object.assign(
+              card,
+              emptyCardRow({ id: card.noteId, topicId: card.topicId }, now),
+              marksOf(card),
+              { cardId: card.cardId }
+            )
+          })
+      })
   }
 }
 

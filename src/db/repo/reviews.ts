@@ -5,6 +5,7 @@ import {
   DEFAULT_RETENTION,
   grade,
   type Grade,
+  type ReviewAnswer,
   type Weights,
 } from "../scheduler"
 import type { CardRow, RevlogRow } from "../types"
@@ -13,6 +14,8 @@ import type { CardRow, RevlogRow } from "../types"
  * Grades the card and writes the new card row and revlog entry atomically. The
  * card's marks (flag, suspend, bury) are taken from the stored row, not from
  * `cardRow`, so a flag set a moment ago on screen is never overwritten.
+ * `answer` says whether the pick was right and how long it took (see
+ * `RevlogRow`); without it the log assumes a pass was a right pick.
  */
 export async function applyReview(
   cardRow: CardRow,
@@ -20,15 +23,25 @@ export async function applyReview(
   durationMs: number,
   retention = DEFAULT_RETENTION,
   weights?: Weights,
-  now = Date.now()
+  now = Date.now(),
+  answer?: ReviewAnswer
 ): Promise<{ row: CardRow; log: RevlogRow }> {
-  const result = grade(cardRow, rating, now, durationMs, retention, weights)
+  const result = grade(
+    cardRow,
+    rating,
+    now,
+    durationMs,
+    retention,
+    weights,
+    answer
+  )
+  const { log } = result
   return db.transaction("rw", [db.cards, db.revlog], async () => {
     const stored = await db.cards.get(cardRow.cardId)
     const row = stored ? { ...result.row, ...marksOf(stored) } : result.row
     await db.cards.put(row)
-    await db.revlog.add(result.log)
-    return { row, log: result.log }
+    await db.revlog.add(log)
+    return { row, log }
   })
 }
 

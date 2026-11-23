@@ -107,6 +107,30 @@ describe("grade", () => {
     expect(second.log.state).toBe(first.row.state)
   })
 
+  it("writes the card's memory state AFTER the review into the log", () => {
+    const { row, log } = grade(emptyCardRow(note, NOW), Rating.Good, NOW)
+    expect(log.stabilityAfter).toBe(row.stability)
+    expect(log.difficultyAfter).toBe(row.difficulty)
+    expect(log.scheduledDaysAfter).toBe(row.scheduledDays)
+    expect(log.dueAfter).toBe(row.due)
+    expect(log.stabilityAfter).toBeGreaterThan(0)
+  })
+
+  it("logs the answer, defaulting to a right pick for a pass", () => {
+    const empty = emptyCardRow(note, NOW)
+    expect(grade(empty, Rating.Good, NOW, 900).log).toMatchObject({
+      correct: true,
+      answerMs: 900,
+    })
+    expect(grade(empty, Rating.Again, NOW, 900).log.correct).toBe(false)
+    // A right pick rated Again (a guess) keeps correct: true.
+    const guess = grade(empty, Rating.Again, NOW, 900, undefined, undefined, {
+      correct: true,
+      answerMs: 300,
+    })
+    expect(guess.log).toMatchObject({ correct: true, answerMs: 300 })
+  })
+
   it("does not mutate the input row", () => {
     const row = emptyCardRow(note, NOW)
     const snapshot = { ...row }
