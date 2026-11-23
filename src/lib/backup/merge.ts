@@ -26,6 +26,7 @@ export function mergeBackup(
     cardsDropped: 0,
     reviewsAdded: 0,
     notesMissingTopic: 0,
+    imagesAdded: 0,
   }
 
   // decks

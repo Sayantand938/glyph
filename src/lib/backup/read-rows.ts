@@ -2,7 +2,8 @@
  * Row validators for backup parsing. Each builds a clean copy, so unknown
  * fields never reach the database.
  */
-import type { CardRow, Deck, Note, RevlogRow } from "@/db/types"
+import type { BackupImage, CardRow, Deck, Note, RevlogRow } from "@/db/types"
+import { IMAGE_ID_RE, isImageMime, looksLikeBase64 } from "@/lib/image"
 
 export type Rec = Record<string, unknown>
 
@@ -97,6 +98,23 @@ export function readCard(v: unknown): CardRow | null {
     state: v.state,
     lastReview: v.lastReview as number,
     updatedAt: v.updatedAt as number,
+  }
+}
+
+export function readImage(v: unknown): BackupImage | null {
+  if (!isRec(v)) return null
+  if (!isStr(v.id) || !IMAGE_ID_RE.test(v.id)) return null
+  if (!isImageMime(v.mime)) return null
+  if (!isIntIn(v.width, 1, 100_000) || !isIntIn(v.height, 1, 100_000)) {
+    return null
+  }
+  if (!isStr(v.data) || !looksLikeBase64(v.data)) return null
+  return {
+    id: v.id,
+    mime: v.mime,
+    width: v.width,
+    height: v.height,
+    data: v.data,
   }
 }
 

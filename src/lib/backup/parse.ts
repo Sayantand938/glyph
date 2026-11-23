@@ -1,8 +1,11 @@
+import type { BackupImage } from "@/db/types"
+
 import {
   isNum,
   isRec,
   readCard,
   readDeck,
+  readImage,
   readLog,
   readNote,
 } from "./read-rows"
@@ -69,6 +72,12 @@ export function parseBackup(text: string): ParseBackupResult {
   if (!cards.ok) return cards
   const revlog = readTable("revlog", data.revlog, readLog)
   if (!revlog.ok) return revlog
+  // Absent in version 1 files; when present it must be valid.
+  const images =
+    data.images === undefined
+      ? { ok: true as const, rows: [] as BackupImage[] }
+      : readTable("images", data.images, readImage)
+  if (!images.ok) return images
 
   return {
     ok: true,
@@ -80,6 +89,7 @@ export function parseBackup(text: string): ParseBackupResult {
       notes: notes.rows,
       cards: cards.rows,
       revlog: revlog.rows,
+      images: images.rows,
     },
   }
 }

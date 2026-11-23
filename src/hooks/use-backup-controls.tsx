@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { importBackup } from "@/db/repo"
-import { readAllData } from "@/db/queries"
+import { readBackupSnapshot } from "@/db/queries"
 import {
   MAX_BACKUP_BYTES,
   backupFilename,
@@ -65,11 +65,13 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
     () =>
       run(async () => {
         const now = Date.now()
-        const file = exportBackup(await readAllData(), now)
+        const { data, images } = await readBackupSnapshot()
+        const file = exportBackup(data, now, images)
         const filename = backupFilename(now)
         download(filename, serializeBackup(file))
+        const pics = images.length > 0 ? `, ${images.length} images` : ""
         return {
-          text: `Exported ${file.notes.length} notes and ${file.revlog.length} reviews to ${filename}.`,
+          text: `Exported ${file.notes.length} notes${pics} and ${file.revlog.length} reviews to ${filename}.`,
           tone: "info",
         }
       }),

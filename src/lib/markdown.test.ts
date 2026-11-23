@@ -77,6 +77,42 @@ describe("parseInline", () => {
     expect(parseInline("costs $5 or $10")).toEqual([t("costs $5 or $10")])
   })
 
+  it("parses stored-image tokens as image atoms", () => {
+    const id = "0123456789abcdef0123456789abcdef"
+    expect(parseInline(`see ![shot](img:${id}) here`)).toEqual([
+      t("see "),
+      { kind: "image", id, alt: "shot" },
+      t(" here"),
+    ])
+    expect(parseInline(`![](img:${id})`)).toEqual([
+      { kind: "image", id, alt: "" },
+    ])
+    // Emphasis can wrap an image, and `_` / `$` in the alt text are inert.
+    expect(parseInline(`**![a_b $x$](img:${id})**`)).toEqual([
+      {
+        kind: "bold",
+        children: [{ kind: "image", id, alt: "a_b $x$" }],
+      },
+    ])
+  })
+
+  it("leaves images that point anywhere else as plain text", () => {
+    for (const text of [
+      "![x](https://example.com/a.png)",
+      "![x](img:abc)",
+      "![x](javascript:alert(1))",
+    ]) {
+      expect(parseInline(text)).toEqual([t(text)])
+    }
+  })
+
+  it("does not read a token inside a code span as an image", () => {
+    const id = "0123456789abcdef0123456789abcdef"
+    expect(parseInline(`\`![](img:${id})\``)).toEqual([
+      { kind: "code", text: `![](img:${id})` },
+    ])
+  })
+
   it("drops private-use characters so they cannot forge atoms", () => {
     expect(parseInline("a" + String.fromCharCode(0xe000) + "b")).toEqual([
       t("ab"),

@@ -10,9 +10,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { saveNote } from "@/db/repo"
+import { NoteImage } from "@/components/note-image"
+import { pruneImages, saveNote } from "@/db/repo"
 import type { Note } from "@/db/types"
+import { useImagePaste } from "@/hooks/use-image-paste"
 import type { OptionIndex } from "@/lib/answer"
+import { imageIdsIn } from "@/lib/image"
 import {
   cleanDraft,
   draftChangesNote,
@@ -53,6 +56,24 @@ export function EditNoteModal({
   )
 }
 
+/** Small previews of the images a field's text uses. Renders nothing without any. */
+function ImageStrip({ text }: { text: string }) {
+  const ids = imageIdsIn(text)
+  if (ids.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-2">
+      {ids.map((id) => (
+        <NoteImage
+          key={id}
+          id={id}
+          alt=""
+          className="my-0 h-16 w-auto border"
+        />
+      ))}
+    </div>
+  )
+}
+
 function noteToDraft(note: Note): NoteDraft {
   return {
     question: note.question,
@@ -82,11 +103,22 @@ function EditForm({
 
   const { valid, errors } = validateDraft(draft)
   const changed = draftChangesNote(original, draft)
+  const { paste, pending: pendingImages, pasted } = useImagePaste(setError)
 
-  function setOption(index: number, value: string) {
+  // A pasted image is stored at once so it can be previewed. If the edit is
+  // cancelled (or the dialog just closed) nothing uses it, so drop it. Saving
+  // prunes by itself.
+  React.useEffect(
+    () => () => {
+      if (pasted.current) void pruneImages().catch(() => undefined)
+    },
+    [pasted]
+  )
+
+  function setOption(index: number, update: (value: string) => string) {
     setDraft((d) => {
       const options = [...d.options] as NoteDraft["options"]
-      options[index] = value
+      options[index] = update(options[index])
       return { ...d, options }
     })
     setError(null)
@@ -94,7 +126,7 @@ function EditForm({
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!valid || busy) return
+    if (!valid || busy || pendingImages > 0) return
     if (!changed && !resetFsrs) {
       onClose()
       return
@@ -117,7 +149,7 @@ function EditForm({
         <DialogTitle>Edit question</DialogTitle>
         <DialogDescription>
           Changes show up straight away. Study progress is kept unless you reset
-          it below.
+          it below. Paste a screenshot into any field to add an image.
         </DialogDescription>
       </DialogHeader>
 
@@ -135,7 +167,16 @@ function EditForm({
             setDraft((d) => ({ ...d, question: e.target.value }))
             setError(null)
           }}
+          onPaste={(e) =>
+            paste(
+              e,
+              (update) =>
+                setDraft((d) => ({ ...d, question: update(d.question) })),
+              true
+            )
+          }
         />
+        <ImageStrip text={draft.question} />
         {errors.question && (
           <p role="alert" className="text-xs text-destructive">
             {errors.question}
@@ -166,8 +207,17 @@ function EditForm({
                 value={draft.options[i]}
                 aria-label={`Option ${LABELS[i]}`}
                 aria-invalid={errors.options[i] !== null}
-                onChange={(e) => setOption(i, e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setOption(i, () => value)
+                }}
+                onPaste={(e) =>
+                  paste(e, (update) => setOption(i, update), false)
+                }
               />
+            </div>
+            <div className="pl-12 empty:hidden">
+              <ImageStrip text={draft.options[i]} />
             </div>
             {errors.options[i] && (
               <p role="alert" className="pl-12 text-xs text-destructive">
@@ -191,7 +241,15 @@ function EditForm({
             setDraft((d) => ({ ...d, extra: e.target.value }))
             setError(null)
           }}
+          onPaste={(e) =>
+            paste(
+              e,
+              (update) => setDraft((d) => ({ ...d, extra: update(d.extra) })),
+              true
+            )
+          }
         />
+        <ImageStrip text={draft.extra} />
       </div>
 
       <label className="flex items-start gap-2 text-xs">
@@ -209,6 +267,12 @@ function EditForm({
         </span>
       </label>
 
+      {pendingImages > 0 && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Adding {pendingImages === 1 ? "image" : "images"}...
+        </p>
+      )}
+
       {error && (
         <p role="alert" className="flex items-start gap-2 text-sm">
           <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -220,7 +284,7 @@ function EditForm({
         <Button type="button" variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" disabled={busy || !valid}>
+        <Button type="submit" disabled={busy || !valid || pendingImages > 0}>
           {busy ? "Saving..." : "Save"}
         </Button>
       </DialogFooter>

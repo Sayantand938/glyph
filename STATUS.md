@@ -59,12 +59,27 @@ Question text, option text and the explanation (`extra`) now render LaTeX with K
 
 ### Markdown in questions (after Phase 7)
 
-Question text, option text and the explanation now render a small Markdown subset on top of the LaTeX support: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `` `inline code` ``, fenced code blocks, `#` headings (levels 4-6 render as level 3), `-`/`*`/`+` and `1.` lists (flat, no nesting), and `>` quotes. Links, images, tables and raw HTML are deliberately not supported. No new dependency: `src/lib/markdown.ts` (`parseMarkdown`, pure, 20 tests in `markdown.test.ts`) is a hand-written parser that returns plain data, and `RichText` turns it into React elements (rule 10 still holds; there is no HTML string anywhere).
+Question text, option text and the explanation now render a small Markdown subset on top of the LaTeX support: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `` `inline code` ``, fenced code blocks, `#` headings (levels 4-6 render as level 3), `-`/`*`/`+` and `1.` lists (flat, no nesting), and `>` quotes. Links, URL images, tables and raw HTML are deliberately not supported (stored images were added later via `![](img:<id>)`, see "Images in questions"). No new dependency: `src/lib/markdown.ts` (`parseMarkdown`, pure, 20 tests in `markdown.test.ts`) is a hand-written parser that returns plain data, and `RichText` turns it into React elements (rule 10 still holds; there is no HTML string anywhere).
 
 - Math and code are cut out first, so `$a_1 * b_2$` is never read as emphasis, `$` inside code stays a dollar sign, and `**value $x$**` works. Display math (`$$`/`\[`) is not broken by lines that look like list or heading syntax.
 - Safe for ordinary quiz text: `2 * 3 * 4`, `snake_case`, `C#`, `#hashtag` and "costs $5 or $10" stay plain. `\*` escapes an asterisk.
 - Text with no block structure renders as a bare fragment exactly as before, so existing notes look the same. Multi-block text becomes stacked `<span>`s, because `RichText` is also used inside a `<button>` (option text), where `p`/`ul`/`pre` are not allowed.
 - Stored text is unchanged, so hashing, `noteId`, import, backup and the editor are unaffected. The edit modal and import preview still show raw text. `sample-data/markdown-sample.json` exercises it.
+
+### Images in questions (after Phase 7)
+
+Question text, option text and the explanation can contain pasted images. **The only way to add one today is to paste into a field of the edit-question modal** (a screenshot from the clipboard); the bulk JSON importer does not support images yet (see the TODO below).
+
+- **Token.** `![alt](img:<id>)`, where `<id>` is the first 32 hex digits of the SHA-256 of the stored bytes. `parseMarkdown` turns it into an `image` inline node (`lib/markdown.ts`); anything else that looks like Markdown image syntax (a URL, a short id, `javascript:`) stays plain text, so there are no network images and no new HTML path. `RichText` renders it through `components/note-image.tsx` (`NoteImage`): an `<img>` built from a `data:` URL (no object URL to revoke), with the stored width/height set to avoid layout shift, `max-w-full`, and a "[missing image]" note if the row is gone.
+- **Storage.** New Dexie table `images` (`id, mime, width, height, blob`), added with `db.version(2).stores({ images: "id" })`; version 1 is untouched. Rows are content-addressed, so the same picture pasted twice is one row and a row never changes. Writes are in `db/repo/images.ts` (`addImage`, `pruneImages`); `loadImageView` and `readBackupSnapshot` are in `db/queries.ts`.
+- **Compression.** `lib/image/encode.ts` (the one browser-only file in `lib/`, not unit-tested) downscales to a longest edge of 1600 px and re-encodes as WebP at quality 0.85, keeping the original only when that is not smaller and nothing was resized (GIFs are kept as they are, to keep animation). A browser that cannot encode WebP falls back to PNG when it had to resize. In the browser a 2400x1200 text screenshot went from 356 KB PNG to 97 KB WebP. Input over 15 MB is refused. The id needs `crypto.subtle`, so saving images needs https or localhost (a clear error is shown otherwise).
+- **Paste flow.** `hooks/use-image-paste.ts` handles `onPaste` on the question, the four options and the extra field of `edit-note-modal.tsx`: image files on the clipboard are encoded, stored at once (so the editor can show a small preview under the field), and a token is inserted at the caret on its own line (options, being single-line, get spaces instead). Plain-text pastes are untouched. Save is disabled while an image is still being processed.
+- **Copying an image from a web page.** An image is never linked or downloaded; it always ends up as a stored local image. `use-image-paste.ts` looks at the clipboard in this order: (1) image files (what "Copy image" in a browser, a screenshot tool or an image editor puts there; the usual case, and any `<img src="https://...">` HTML that comes with the file is ignored); (2) if there is no file, inline `data:image/...;base64` images in the pasted HTML, decoded locally (`lib/image/clipboard.ts`: `imageSourcesInHtml`, `parseDataUrl`, pure); (3) an HTML image that only has an `http(s):`/`blob:` URL cannot be stored (the app makes no network calls and such fetches are usually blocked by CORS anyway), so it is left out, any text in the paste still goes through, and the editor shows "That is a link to an image on a website ... Right-click the image, choose Copy image, and paste again." At most 10 images per paste. Verified in the browser with simulated clipboards: file plus remote-URL HTML (stored, no URL in the text), HTML with a `data:` image (stored), HTML with a remote link (message, nothing stored). Not exercised with a real clipboard from a real web page.
+- **Orphans.** `saveNote` deletes every image no note refers to, in its own transaction (tombstoned notes still count, so a restored note keeps its pictures). Closing the modal without saving prunes too, if anything was pasted. Export only writes images that notes use. A JSON re-import that rewrites option or extra text can leave an image unused until the next `saveNote`; harmless.
+- **Backup.** `BACKUP_SCHEMA_VERSION` is now 2: the file gains an `images` list (`id, mime, width, height, data` as base64, only referenced images). Version 1 files (no `images`) still import; image rows are validated (hex id, one of webp/png/jpeg/gif, positive size, base64 shape). `importBackup` adds only the images the device lacks (`missingImages`, pure) in the same transaction; `MergeStats.imagesAdded` is reported in the summary. `mergeBackup` itself is unchanged. `readAllData` was replaced by `readBackupSnapshot`. At roughly 130 KB per image in the JSON, 300 images add about 40 MB to a backup (the 100 MB cap still applies).
+- **Tests.** `lib/image.test.ts` (token build/parse, `insertAt`, `fitWithin`, base64, `imageId`, `missingImages`) plus new cases in `markdown.test.ts` and `backup.test.ts`: 220 tests in total. Verified in the browser (dev server): paste into the question (token on its own line, 356 KB -> 97 KB WebP, preview in the editor, rendered on the card after saving), paste into an option then cancel (the orphan was deleted, the saved image kept), and a backup round trip (clear the table, re-import, same id and byte size, a second import is "Nothing new to merge"). Not exercised: a real clipboard paste (the event was dispatched with a generated file), a phone, Safari/iOS (WebP encoding falls back to PNG there), and the offline/PWA path.
+
+**TODO: images in the bulk JSON importer.** Not designed yet. Options discussed: reference images by filename (`![](img:diagram1.png)`) and pick the image files together with the JSON in the import modal (no zip library needed), or let the JSON carry a top-level `images` map of base64 data. Either needs `lib/importer` to resolve names to ids (encode and hash each file, rewrite the tokens in the rows before planning), the import preview to show missing/unused files, and `commitImport` to write the `images` rows in its transaction. The image encoder, token format and orphan handling above are already reusable for it.
 
 ### Refactor: smaller files (after Phase 7)
 
@@ -122,7 +137,8 @@ Pure restructuring, no behavior change. The four largest modules became director
 
 1. Replace the placeholder PWA icons in `public/icons/` (192, 512, maskable-512, apple-touch-icon) with real art.
 2. Install the production build as a PWA on a phone (Android and iOS) and repeat the offline check there; the manual test script's items 14-15 were only checked in the desktop browser pane.
-3. Items from "Nice-to-Haves" in section 12, if wanted.
+3. Images in the bulk JSON importer (see "Images in questions").
+4. Items from "Nice-to-Haves" in section 12, if wanted.
 
 ---
 
@@ -484,7 +500,7 @@ Ignore shortcuts while any modal is open or focus is in an input/textarea.
 
 ## 11. Out of Scope (for now)
 
-Cloud sync, accounts, images/rich text in questions, per-deck FSRS parameter tuning, statistics charts, deck export to Anki format, multi-select questions.
+Cloud sync, accounts, images/rich text in questions (both since added, see above; images are paste-only and not in the JSON importer yet), per-deck FSRS parameter tuning, statistics charts, deck export to Anki format, multi-select questions.
 
 ## 12. Nice-to-Haves (only after all checkpoints pass)
 

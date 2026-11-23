@@ -1,7 +1,8 @@
 import type { BackupFile, CardRow, Deck, Note, RevlogRow } from "@/db/types"
 
 export const BACKUP_APP = "mcq-srs"
-export const BACKUP_SCHEMA_VERSION = 1
+/** 2 added `images`; version 1 files (no images) are still accepted. */
+export const BACKUP_SCHEMA_VERSION = 2
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024
 
 /** The four tables, without the file envelope. */
@@ -27,6 +28,8 @@ export interface MergeStats {
   reviewsAdded: number
   /** Notes in the merged result whose topic is not in the merged decks. */
   notesMissingTopic: number
+  /** Images from the backup that this device did not have. Set by the DB layer. */
+  imagesAdded: number
 }
 
 export interface MergeResult {

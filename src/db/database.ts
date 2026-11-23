@@ -1,13 +1,14 @@
 import Dexie, { type Table } from "dexie"
 
 import { seedIfEmpty } from "./seed"
-import type { CardRow, Deck, Note, RevlogRow } from "./types"
+import type { CardRow, Deck, ImageRow, Note, RevlogRow } from "./types"
 
 export class GlyphDB extends Dexie {
   decks!: Table<Deck, string>
   notes!: Table<Note, string>
   cards!: Table<CardRow, string>
   revlog!: Table<RevlogRow, string>
+  images!: Table<ImageRow, string>
 
   constructor() {
     super("glyph")
@@ -19,6 +20,8 @@ export class GlyphDB extends Dexie {
         "cardId, noteId, topicId, state, due, [topicId+state], [topicId+due]",
       revlog: "id, cardId, reviewedAt",
     })
+    // Images pasted into notes; only adds a table, existing rows are untouched.
+    this.version(2).stores({ images: "id" })
   }
 }
 
