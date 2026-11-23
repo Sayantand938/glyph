@@ -1,6 +1,6 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadStudyCards } from "@/db/queries"
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
@@ -42,7 +42,11 @@ export function StudyOptionsPage({
   const [limitText, setLimitText] = React.useState(
     options.newLimit === null ? "" : String(options.newLimit)
   )
-  const cards = useLiveQuery(() => loadStudyCards(scope), [scope])
+  const cards = useLiveQuery(
+    () => loadStudyCards(scope),
+    [scope],
+    ["decks", "notes", "cards"]
+  )
 
   if (!cards) {
     return (

@@ -7,6 +7,7 @@
  */
 import type { ImageRow } from "@/db/types"
 
+import { bytesToBase64 } from "./base64"
 import { fitWithin } from "./fit"
 import { imageId } from "./id"
 import {
@@ -77,7 +78,7 @@ export async function encodeImage(file: Blob): Promise<ImageRow> {
       mime,
       width,
       height,
-      blob,
+      data: bytesToBase64(new Uint8Array(await blob.arrayBuffer())),
     }
   } finally {
     bitmap.close()

@@ -1,24 +1,23 @@
 # Glyph
 
-Offline-first, Anki-style MCQ spaced-repetition PWA. Single user, no backend, no auth, no runtime network calls. Data lives in IndexedDB (Dexie), scheduling is FSRS (`ts-fsrs`), and devices sync by moving JSON backup files or directly over the local network (WebRTC, pairing by copy-and-pasted codes, no server; `src/lib/sync/`).
+Offline-first, Anki-style MCQ spaced-repetition desktop app (Tauri 2). Single user, no backend, no auth, no runtime network calls. Data lives in a local SQLite file (written through a thin Rust bridge, `src-tauri/src/sql.rs`), scheduling is FSRS (`ts-fsrs`), and devices sync by moving JSON backup files or directly over the local network (WebRTC, pairing by copy-and-pasted codes, no server; `src/lib/sync/`).
 
 **Read [STATUS.md](STATUS.md) first.** It holds the full build plan, the phase checkpoints, which phase is current, and where the implementation deliberately differs from the plan. Update it at the end of every phase.
 
 ## Stack
 
-Vite 8 + React 19 (client-only SPA), TypeScript `strict`, Tailwind CSS v4 (`@tailwindcss/vite`), shadcn/ui (`@base-ui/react`), Dexie + `dexie-react-hooks`, `ts-fsrs`, `katex` (LaTeX in questions), `lucide-react`, `vite-plugin-pwa`, Vitest.
+Vite 8 + React 19 (client-only SPA), TypeScript `strict`, Tailwind CSS v4 (`@tailwindcss/vite`), shadcn/ui (`@base-ui/react`), SQLite (`rusqlite`, schema and queries in TypeScript), `ts-fsrs`, `katex` (LaTeX in questions), `lucide-react`, Vitest.
 
 The project started on Next.js and was migrated to Vite before Phase 4. There is no SSR, no router and no server code.
 
 ## Commands
 
 ```powershell
-npm run dev        # vite dev server, http://localhost:5173
-npm run build      # tsc --noEmit && vite build (also generates the service worker)
-npm run preview    # serve the production build (use this to test offline/PWA)
+npm run dev        # vite dev server only; the app needs Tauri to reach SQLite
+npm run build      # tsc --noEmit && vite build (the web assets Tauri bundles)
 npm test           # vitest run (node environment, src/**/*.test.ts)
 npm run tauri dev  # desktop shell around the dev server (Rust required)
-npm run tauri build # desktop exe + installer; no service worker (see Gotchas)
+npm run tauri build # desktop exe + installer
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint .
 npm run format     # prettier --write "**/*.{ts,tsx}"
@@ -32,15 +31,16 @@ The `@/*` alias maps to `src/`.
 
 ```
 index.html          entry; inline script applies the saved theme before first paint
-vite.config.ts      react + tailwind + VitePWA (manifest lives here)
+vite.config.ts      react + tailwind (fixed port 5173 for Tauri)
 src/main.tsx        mounts <ThemeProvider><DbProvider><App/>
 src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
 src/components/     React components (ui/ = shadcn; study/ = study options page and study session; import/ = import page; browse/ = browse page; no modals, edit/confirm/import screens are full pages built on page-shell.tsx)
-src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads), backup-parts.ts / backup-file.ts / import-file.ts / backup-local.ts (the backup file and sync parts, digests, merge planning), snapshots.ts and backup-folder.ts (browser only: copies before an import, the auto-backup folder)
+src/db/             SQLite access and startup (database.ts opens the backend, migrates, seeds; sql.ts = `Database`/transactions; schema.ts = migrations; tables.ts = row mapping and helpers; live.ts = change notifications; tauri-backend.ts and test-backend.ts = the two backends), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads), backup-parts.ts / backup-file.ts / import-file.ts / backup-local.ts (the backup file and sync parts, digests, merge planning), snapshots.ts and backup-folder.ts (browser only: copies before an import, the auto-backup folder)
 src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, study-options, backup/ (merge, the streamed checksummed .glyph file, import snapshots, reminders), session, browse, note-edit, tags, card-marks, card-history, leech, settings (synced settings rows, merge), retention, math, markdown, fsrs/ (the parameter optimizer: model, autodiff, history, optimize, days), image/ (tokens, fit, id, base64; encode.ts is browser-only), sync/ (pairing codes, the wire protocol, digests and connection diagnostics for device sync; rtc.ts is the browser-only WebRTC part)
 src/hooks/          React hooks (use-theme.ts)
-public/             static assets, PWA icons in public/icons/
+public/             static assets, icons in public/icons/
+src-tauri/          Tauri 2 shell + the SQLite bridge (sql.rs); generated parts come from `tauri init`
 ```
 
 Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` are directories behind an `index.ts` barrel, so import them as `@/lib/backup`, `@/lib/importer` and `@/db/repo`; keep each file focused on one concern.
@@ -50,20 +50,21 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 1. Build in phase order; don't start a phase until the previous checkpoint passes.
 2. No `any`, no `@ts-ignore`.
 3. UI code never imports `ts-fsrs`. Everything FSRS goes through `src/db/scheduler.ts` (which re-exports `Rating`, `State`, `Grade`).
-4. All writes go through `src/db/repo/` (import from `@/db/repo`), each in one Dexie transaction. Components only read (`useLiveQuery`).
+4. All writes go through `src/db/repo/` (import from `@/db/repo`), each in one SQL transaction (`db.transaction(async (tx) => ...)`, using only `tx` inside). Components only read (`useLiveQuery` from `@/hooks/use-live-query`, which takes the list of tables the query reads).
 5. Pure logic (answer normalization, hashing, shuffling, queue building, merging, import planning) lives in `src/lib/` with unit tests and no DB or React imports.
-6. Never edit Dexie `version(1)` after release; add `db.version(n).upgrade()`.
+6. Never edit a migration in `src/db/schema.ts` after release; append a new one (the file's `user_version` records how many ran).
 7. A note's `id` is frozen at creation. Editing a question never changes it; re-import must never touch a card row. Deleting a question is a soft delete (`deleteNote` in `src/db/repo/notes.ts` sets `deletedAt`, like decks); the card row and revlog stay, and every read filters out tombstoned notes.
 8. No new dependencies beyond the stack above without a stated reason.
-9. Components that query Dexie render under `DbProvider`, which runs `initDatabase()` (persist + seed) first.
+9. Components that query the database render under `DbProvider`, which runs `initDatabase()` (open, migrate, seed) first.
 10. Question/option/explanation text is rendered as plain text (React escapes it). Never `dangerouslySetInnerHTML`. Rich text goes through `RichText` (`src/components/rich-text.tsx`), which builds React elements from `parseMarkdown` (`src/lib/markdown.ts`: bold, italic, strike, inline code, code fences, headings, lists, quotes, and `![alt](img:<id>)` for an image stored in the `images` table, rendered by `NoteImage` as an `<img>` from a `data:` URL; no links, URL images, tables or raw HTML) and calls `katex.render` into a ref for math, never an HTML string. Delimiters are parsed by `splitMath` in `src/lib/math.ts`: `$...$` (the default, documented form), `$$...$$`, `\(...\)` and `\[...\]` are all supported; `\$` is a literal dollar sign.
 11. Two-grade scale only: reviews are `Again` (fail) or `Good` (pass), the `Grade` type in `scheduler.ts`. Never add Hard/Easy buttons or write ratings 2/4 (old logs and imported backups may contain them; keep accepting those).
 
 ## Gotchas
 
-- Tauri 2 desktop shell lives in `src-tauri/` (made with `tauri init` and `tauri icon`; only the identifier in `tauri.conf.json` was edited). Data is still IndexedDB inside WebView2. The Tauri CLI sets `TAURI_ENV_PLATFORM`; `vite.config.ts` then drops `vite-plugin-pwa` and aliases `virtual:pwa-register/react` to `src/lib/pwa-register-stub.ts`, so `PwaToast` renders nothing. A plain `npm run build` (Vercel) still builds the PWA.
+- The Tauri 2 shell lives in `src-tauri/` (made with `tauri init` and `tauri icon`; only the identifier in `tauri.conf.json` was edited). The data file is `glyph.db` in the app data folder (`%APPDATA%\app.glyph.desktop`). Rust only runs SQL (`sql_select`, `sql_execute`, `sql_execute_many`, `sql_script`); the front end serializes calls (`Database` in `sql.ts`), so a transaction is `BEGIN IMMEDIATE` ... `COMMIT` on one connection. Inside `db.transaction` never call `db.select`/`db.execute` (they wait for the transaction to end); use `tx`. Tests run the same SQL on `node:sqlite` (`test-backend.ts`). The PWA was dropped: no service worker, manifest or Vercel deploy, and no browser build of the data layer.
+- Images are stored as base64 text (`ImageRow.data`), the same text a backup carries. A note's tags live as JSON on the row and in `note_tags` (the lookup for one tag); write notes through `putNotes`/`addNotes` in `src/db/tables.ts`, never with a bare `INSERT INTO notes`.
 
-- Retention, the fitted FSRS weights (`fit`), auto-fit and the leech rule are not localStorage preferences: they are rows in the Dexie `settings` table, read with `useSettings`/`useSetting` (`src/hooks/use-settings.ts`), written with `saveSetting` (`@/db/repo`), and merged key by key (newer `updatedAt`) in backups and device sync. A new synced setting needs an entry in `SETTING_PARSERS` (`src/lib/settings.ts`). Do not add review, learning or new-card caps.
+- Retention, the fitted FSRS weights (`fit`), auto-fit and the leech rule are not localStorage preferences: they are rows in the `settings` table, read with `useSettings`/`useSetting` (`src/hooks/use-settings.ts`), written with `saveSetting` (`@/db/repo`), and merged key by key (newer `updatedAt`) in backups and device sync. A new synced setting needs an entry in `SETTING_PARSERS` (`src/lib/settings.ts`). Do not add review, learning or new-card caps.
 
 - Card marks (flag, suspended, buriedUntil, markedAt; `src/lib/card-marks.ts`) live on the card row but are not FSRS progress. Reviews, undo and "Reset FSRS progress" must keep them (take them from the stored row, not a screen copy), `countCards`/`buildQueue` skip hidden cards, and backup merge decides them by `markedAt` apart from progress (`pickCard`). Writes go through `src/db/repo/cards.ts`.
 

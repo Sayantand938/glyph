@@ -1,16 +1,32 @@
-/** Read-only queries. Writes live in repo.ts. Call these from `useLiveQuery`. */
+/**
+ * Read-only queries. Writes live in repo/. Call these from `useLiveQuery`, and
+ * list the tables a query reads there so it re-runs when they change.
+ */
 import type { BackupData } from "@/lib/backup"
 import { makeBrowseRow, type BrowseRow } from "@/lib/browse"
 import type { ReviewRecord } from "@/lib/fsrs"
-import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
+import { imageIdsInNotes } from "@/lib/image"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
 import { db } from "./database"
+import type { SqlRunner } from "./sql"
+import {
+  CARDS,
+  DECKS,
+  IDS,
+  IMAGES,
+  NOTES,
+  REVLOG,
+  SETTINGS,
+  allRows,
+  getRow,
+  getRows,
+  queryRows,
+} from "./tables"
 import type {
   BackupImage,
   CardRow,
   Deck,
-  ImageRow,
   Note,
   RevlogRow,
   SettingRow,
@@ -50,8 +66,8 @@ function byName(a: Deck, b: Deck): number {
  * live Topics under live Subjects (a card is not tombstoned with its note).
  */
 export async function loadDashboard(now: number): Promise<DashboardData> {
-  return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
-    const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
+  return db.transaction(async (tx) => {
+    const decks = (await allRows(tx, DECKS)).filter((d) => d.deletedAt === null)
     const subjects = decks.filter((d) => d.parentId === null).sort(byName)
     const subjectIds = new Set(subjects.map((s) => s.id))
 
@@ -63,16 +79,19 @@ export async function loadDashboard(now: number): Promise<DashboardData> {
     }
     for (const list of topics.values()) list.sort(byName)
 
-    // Only tombstones carry a numeric deletedAt, so this index lookup is small.
-    const deadNotes = new Set(
-      await db.notes.where("deletedAt").above(0).primaryKeys()
-    )
     const topicIds = [...topics.values()].flat().map((t) => t.id)
-    const cards = await db.cards.where("topicId").anyOf(topicIds).toArray()
+    // A card is not tombstoned with its note, so cards of deleted notes are
+    // left out here.
+    const cards = await queryRows(
+      tx,
+      CARDS,
+      `WHERE topicId ${IDS}
+         AND noteId NOT IN (SELECT id FROM notes WHERE deletedAt IS NOT NULL)`,
+      [JSON.stringify(topicIds)]
+    )
 
-    const byTopic = new Map<string, typeof cards>()
+    const byTopic = new Map<string, CardRow[]>()
     for (const card of cards) {
-      if (deadNotes.has(card.noteId)) continue
       const list = byTopic.get(card.topicId)
       if (list) list.push(card)
       else byTopic.set(card.topicId, [card])
@@ -83,33 +102,46 @@ export async function loadDashboard(now: number): Promise<DashboardData> {
       counts.set(id, list ? countCards(list, now) : ZERO_COUNTS)
     }
 
-    // One index lookup per distinct tag; tags only on deleted questions or in
-    // deleted decks have no live cards and are left out.
-    const liveTopics = new Set(topicIds)
+    // The cards of live notes in live Topics, by tag; tags only on deleted
+    // questions or in deleted decks have none and are left out.
+    const tagged = await tx.select(
+      `SELECT t.tag AS tag, c.*
+         FROM note_tags t
+         JOIN notes n ON n.id = t.noteId
+         JOIN cards c ON c.cardId = n.id
+        WHERE n.deletedAt IS NULL AND n.topicId ${IDS}
+        ORDER BY t.tag`,
+      [JSON.stringify(topicIds)]
+    )
     const tags: TagSummary[] = []
-    for (const tag of (await db.notes
-      .orderBy("tags")
-      .uniqueKeys()) as string[]) {
-      const notes = (await db.notes.where("tags").equals(tag).toArray()).filter(
-        (n) => n.deletedAt === null && liveTopics.has(n.topicId)
-      )
-      if (notes.length === 0) continue
-      const tagged = (await db.cards.bulkGet(notes.map((n) => n.id))).filter(
-        (card): card is CardRow => card !== undefined
-      )
-      tags.push({ tag, counts: countCards(tagged, now) })
+    let currentTag: string | null = null
+    let group: CardRow[] = []
+    const flush = () => {
+      if (currentTag !== null) {
+        tags.push({ tag: currentTag, counts: countCards(group, now) })
+      }
     }
+    for (const row of tagged) {
+      const tag = String(row.tag)
+      if (tag !== currentTag) {
+        flush()
+        currentTag = tag
+        group = []
+      }
+      group.push(CARDS.fromRow(row))
+    }
+    flush()
 
     return { subjects, topics, counts, tags }
   })
 }
 
 /** Live Subjects, and live Topics under them, as ids and names. */
-async function liveDecks(): Promise<{
+async function liveDecks(tx: SqlRunner): Promise<{
   subjects: Map<string, Deck>
   topics: Deck[]
 }> {
-  const decks = (await db.decks.toArray()).filter((d) => d.deletedAt === null)
+  const decks = (await allRows(tx, DECKS)).filter((d) => d.deletedAt === null)
   const subjects = new Map(
     decks.filter((d) => d.parentId === null).map((d) => [d.id, d])
   )
@@ -129,14 +161,22 @@ function topicsInScope(topics: Deck[], scope: QueryScope | null): Deck[] {
 
 /** The live notes of `topics`; with a tag scope only those carrying the tag. */
 async function liveNotesIn(
+  tx: SqlRunner,
   topics: Deck[],
   scope: QueryScope | null
 ): Promise<Note[]> {
   const ids = topics.map((t) => t.id)
   const notes =
     scope?.kind === "tag"
-      ? await db.notes.where("tags").equals(scope.id).toArray()
-      : await db.notes.where("topicId").anyOf(ids).toArray()
+      ? await queryRows(
+          tx,
+          NOTES,
+          "WHERE id IN (SELECT noteId FROM note_tags WHERE tag = ?)",
+          [scope.id]
+        )
+      : await queryRows(tx, NOTES, `WHERE topicId ${IDS}`, [
+          JSON.stringify(ids),
+        ])
   const topicIds = new Set(ids)
   return notes.filter((n) => n.deletedAt === null && topicIds.has(n.topicId))
 }
@@ -146,11 +186,14 @@ async function liveNotesIn(
  * (under live Subjects) within `scope`. Feed the result to `buildQueue`.
  */
 export async function loadStudyCards(scope: QueryScope): Promise<CardRow[]> {
-  return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
-    const { topics } = await liveDecks()
-    const notes = await liveNotesIn(topicsInScope(topics, scope), scope)
-    const cards = await db.cards.bulkGet(notes.map((n) => n.id))
-    return cards.filter((card): card is CardRow => card !== undefined)
+  return db.transaction(async (tx) => {
+    const { topics } = await liveDecks(tx)
+    const notes = await liveNotesIn(tx, topicsInScope(topics, scope), scope)
+    return getRows(
+      tx,
+      CARDS,
+      notes.map((n) => n.id)
+    )
   })
 }
 
@@ -167,22 +210,30 @@ export interface BrowseItem {
 export async function loadBrowseItems(
   scope: QueryScope | null
 ): Promise<BrowseItem[]> {
-  return db.transaction("r", [db.decks, db.notes, db.cards], async () => {
-    const { subjects, topics: allTopics } = await liveDecks()
+  return db.transaction(async (tx) => {
+    const { subjects, topics: allTopics } = await liveDecks(tx)
     const topics = topicsInScope(allTopics, scope)
     const topicById = new Map(topics.map((t) => [t.id, t]))
 
-    const notes = await liveNotesIn(topics, scope)
-    const cards = await db.cards.bulkGet(notes.map((n) => n.id))
+    const notes = await liveNotesIn(tx, topics, scope)
+    const cardById = new Map(
+      (
+        await getRows(
+          tx,
+          CARDS,
+          notes.map((n) => n.id)
+        )
+      ).map((card) => [card.cardId, card])
+    )
 
-    return notes.map((note, i) => {
+    return notes.map((note) => {
       const topic = topicById.get(note.topicId)
       const subject = topic?.parentId ? subjects.get(topic.parentId) : undefined
       return {
         note,
         row: makeBrowseRow(
           note,
-          cards[i],
+          cardById.get(note.id),
           topic?.name ?? "",
           subject?.name ?? ""
         ),
@@ -200,10 +251,10 @@ export interface StudyCardView {
 export async function loadStudyCard(
   cardId: string
 ): Promise<StudyCardView | null> {
-  return db.transaction("r", [db.notes, db.cards], async () => {
-    const card = await db.cards.get(cardId)
+  return db.transaction(async (tx) => {
+    const card = await getRow(tx, CARDS, cardId)
     if (!card) return null
-    const note = await db.notes.get(card.noteId)
+    const note = await getRow(tx, NOTES, card.noteId)
     if (!note || note.deletedAt !== null) return null
     return { card, note }
   })
@@ -213,9 +264,11 @@ export async function loadStudyCard(
 export async function loadCardHistory(
   cardId: string
 ): Promise<{ card: CardRow | null; logs: RevlogRow[] }> {
-  return db.transaction("r", [db.cards, db.revlog], async () => ({
-    card: (await db.cards.get(cardId)) ?? null,
-    logs: await db.revlog.where("cardId").equals(cardId).sortBy("reviewedAt"),
+  return db.transaction(async (tx) => ({
+    card: (await getRow(tx, CARDS, cardId)) ?? null,
+    logs: await queryRows(tx, REVLOG, "WHERE cardId = ? ORDER BY reviewedAt", [
+      cardId,
+    ]),
   }))
 }
 
@@ -228,11 +281,10 @@ export interface ImageView {
 
 /** A stored image ready for an <img>, or null if there is none with that id. */
 export async function loadImageView(id: string): Promise<ImageView | null> {
-  const row = await db.images.get(id)
+  const row = await db.transaction((tx) => getRow(tx, IMAGES, id))
   if (!row) return null
-  const bytes = new Uint8Array(await row.blob.arrayBuffer())
   return {
-    src: `data:${row.mime};base64,${bytesToBase64(bytes)}`,
+    src: `data:${row.mime};base64,${row.data}`,
     width: row.width,
     height: row.height,
   }
@@ -247,37 +299,25 @@ export async function readBackupSnapshot(): Promise<{
   images: BackupImage[]
   settings: SettingRow[]
 }> {
-  const { data, rows, settings } = await db.transaction(
-    "r",
-    [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
-    async () => {
-      const data: BackupData = {
-        decks: await db.decks.toArray(),
-        notes: await db.notes.toArray(),
-        cards: await db.cards.toArray(),
-        revlog: await db.revlog.toArray(),
-      }
-      const used = imageIdsInNotes(data.notes)
-      const found = await db.images.bulkGet([...used])
-      return {
-        data,
-        rows: found.filter((row): row is ImageRow => row !== undefined),
-        settings: await db.settings.toArray(),
-      }
+  return db.transaction(async (tx) => {
+    const data: BackupData = {
+      decks: await allRows(tx, DECKS),
+      notes: await allRows(tx, NOTES),
+      cards: await allRows(tx, CARDS),
+      revlog: await allRows(tx, REVLOG),
     }
-  )
-  // Blob -> bytes is not an IndexedDB call, so it stays outside the transaction.
-  const images: BackupImage[] = []
-  for (const row of rows) {
-    images.push({
-      id: row.id,
-      mime: row.mime,
-      width: row.width,
-      height: row.height,
-      data: bytesToBase64(new Uint8Array(await row.blob.arrayBuffer())),
-    })
-  }
-  return { data, images, settings }
+    const used = imageIdsInNotes(data.notes)
+    return {
+      data,
+      images: await getRows(tx, IMAGES, [...used]),
+      settings: await allRows(tx, SETTINGS),
+    }
+  })
+}
+
+async function count(sql: string, params: (string | number)[] = []) {
+  const rows = await db.select(sql, params)
+  return Number(rows[0]?.n ?? 0)
 }
 
 /**
@@ -287,19 +327,24 @@ export async function readBackupSnapshot(): Promise<{
  */
 export async function countChangesSince(since: number | null): Promise<number> {
   if (since === null) {
-    return (await db.revlog.count()) + (await db.notes.count())
+    return (
+      (await count("SELECT COUNT(*) AS n FROM revlog")) +
+      (await count("SELECT COUNT(*) AS n FROM notes"))
+    )
   }
   const [reviews, edited, deleted] = await Promise.all([
-    db.revlog.where("reviewedAt").above(since).count(),
-    db.notes.where("contentUpdatedAt").above(since).count(),
-    db.notes.where("deletedAt").above(since).count(),
+    count("SELECT COUNT(*) AS n FROM revlog WHERE reviewedAt > ?", [since]),
+    count("SELECT COUNT(*) AS n FROM notes WHERE contentUpdatedAt > ?", [
+      since,
+    ]),
+    count("SELECT COUNT(*) AS n FROM notes WHERE deletedAt > ?", [since]),
   ])
   return reviews + edited + deleted
 }
 
 /** How many reviews the log holds; the automatic refit paces itself by this. */
 export async function countReviews(): Promise<number> {
-  return db.revlog.count()
+  return count("SELECT COUNT(*) AS n FROM revlog")
 }
 
 /**
@@ -307,16 +352,38 @@ export async function countReviews(): Promise<number> {
  * deleted questions are kept: they are still real evidence of how memory works.
  */
 export async function loadReviewRecords(): Promise<ReviewRecord[]> {
-  const rows = await db.revlog.toArray()
-  return rows.map(({ cardId, reviewedAt, rating, state }) => ({
-    cardId,
-    reviewedAt,
-    rating,
-    state,
+  const rows = await db.select(
+    "SELECT cardId, reviewedAt, rating, state FROM revlog"
+  )
+  return rows.map((row) => ({
+    cardId: String(row.cardId),
+    reviewedAt: Number(row.reviewedAt),
+    rating: Number(row.rating),
+    state: Number(row.state),
   }))
 }
 
 /** Every tag used by any note (deleted ones included), sorted, for suggestions. */
 export async function loadTagNames(): Promise<string[]> {
-  return (await db.notes.orderBy("tags").uniqueKeys()) as string[]
+  const rows = await db.select(
+    "SELECT DISTINCT tag FROM note_tags ORDER BY tag"
+  )
+  return rows.map((row) => String(row.tag))
+}
+
+/** Every deck, tombstones included (the import page filters them itself). */
+export async function loadDecks(): Promise<Deck[]> {
+  return db.transaction((tx) => allRows(tx, DECKS))
+}
+
+/** The stored notes of one topic, tombstones included, for the import preview. */
+export async function loadTopicNotes(topicId: string): Promise<Note[]> {
+  return db.transaction((tx) =>
+    queryRows(tx, NOTES, "WHERE topicId = ?", [topicId])
+  )
+}
+
+/** Every stored setting row. */
+export async function loadSettings(): Promise<SettingRow[]> {
+  return db.transaction((tx) => allRows(tx, SETTINGS))
 }

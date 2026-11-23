@@ -1,12 +1,10 @@
 # Glyph
 
-Offline-first, Anki-style MCQ spaced-repetition PWA. Vite + React + TypeScript, Dexie (IndexedDB), FSRS via `ts-fsrs`.
+Offline-first, Anki-style MCQ spaced-repetition desktop app. Tauri 2 + Vite + React + TypeScript, SQLite, FSRS via `ts-fsrs`.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
 npm test
-npm run build && npm run preview
 
 npm run tauri dev     # desktop app (needs Rust and WebView2)
 npm run tauri build   # installer in src-tauri/target/release/bundle

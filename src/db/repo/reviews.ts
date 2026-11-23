@@ -16,6 +16,16 @@ import {
   type ReviewAnswer,
   type Weights,
 } from "../scheduler"
+import {
+  CARDS,
+  NOTES,
+  REVLOG,
+  addRows,
+  deleteRows,
+  getRow,
+  putNotes,
+  putRows,
+} from "../tables"
 import type { CardRow, RevlogRow } from "../types"
 
 /**
@@ -63,22 +73,24 @@ export async function applyReview(
     answer
   )
   const { log } = result
-  return db.transaction("rw", [db.cards, db.revlog, db.notes], async () => {
-    const stored = await db.cards.get(cardRow.cardId)
+  return db.transaction(async (tx) => {
+    const stored = await getRow(tx, CARDS, cardRow.cardId)
     let row = stored ? { ...result.row, ...marksOf(stored) } : result.row
     let outcome: LeechOutcome | null = null
 
     if (leech && isLeechLapse(cardRow.lapses, row.lapses, leech.threshold)) {
-      const note = await db.notes.get(row.noteId)
+      const note = await getRow(tx, NOTES, row.noteId)
       if (note && note.deletedAt === null) {
         const tags = withLeechTag(note.tags)
         const taggedNote = !sameTags(tags, note.tags)
         if (taggedNote) {
-          await db.notes.put({
-            ...note,
-            tags,
-            contentUpdatedAt: Math.max(now, note.contentUpdatedAt + 1),
-          })
+          await putNotes(tx, [
+            {
+              ...note,
+              tags,
+              contentUpdatedAt: Math.max(now, note.contentUpdatedAt + 1),
+            },
+          ])
         }
         const suspended = leech.action === "suspend" && !row.suspended
         if (suspended) {
@@ -97,8 +109,8 @@ export async function applyReview(
       }
     }
 
-    await db.cards.put(row)
-    await db.revlog.add(log)
+    await putRows(tx, CARDS, [row])
+    await addRows(tx, REVLOG, [log])
     return { row, log, leech: outcome }
   })
 }
@@ -117,10 +129,10 @@ export async function undoReview(
   leech?: LeechOutcome | null,
   now = Date.now()
 ): Promise<boolean> {
-  return db.transaction("rw", [db.cards, db.revlog, db.notes], async () => {
-    const log = await db.revlog.get(logId)
+  return db.transaction(async (tx) => {
+    const log = await getRow(tx, REVLOG, logId)
     if (!log || log.cardId !== previousCardRow.cardId) return false
-    const stored = await db.cards.get(previousCardRow.cardId)
+    const stored = await getRow(tx, CARDS, previousCardRow.cardId)
     let marks = stored ? marksOf(stored) : null
     if (leech?.suspended && marks?.suspended) {
       marks = {
@@ -129,19 +141,21 @@ export async function undoReview(
         markedAt: Math.max(now, marks.markedAt + 1),
       }
     }
-    await db.cards.put(
-      marks ? { ...previousCardRow, ...marks } : previousCardRow
-    )
-    await db.revlog.delete(logId)
+    await putRows(tx, CARDS, [
+      marks ? { ...previousCardRow, ...marks } : previousCardRow,
+    ])
+    await deleteRows(tx, REVLOG, [logId])
 
     if (leech?.taggedNote) {
-      const note = await db.notes.get(previousCardRow.noteId)
+      const note = await getRow(tx, NOTES, previousCardRow.noteId)
       if (note && note.deletedAt === null) {
-        await db.notes.put({
-          ...note,
-          tags: withoutLeechTag(note.tags),
-          contentUpdatedAt: Math.max(now, note.contentUpdatedAt + 1),
-        })
+        await putNotes(tx, [
+          {
+            ...note,
+            tags: withoutLeechTag(note.tags),
+            contentUpdatedAt: Math.max(now, note.contentUpdatedAt + 1),
+          },
+        ])
       }
     }
     return true

@@ -1,7 +1,6 @@
-import { useLiveQuery } from "dexie-react-hooks"
-
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadCardHistory } from "@/db/queries"
 import { formatInterval } from "@/db/scheduler"
 import type { Note, RevlogRow } from "@/db/types"
@@ -60,7 +59,11 @@ export function CardHistoryPage({
   note: Note
   onClose: () => void
 }) {
-  const view = useLiveQuery(() => loadCardHistory(note.id), [note.id])
+  const view = useLiveQuery(
+    () => loadCardHistory(note.id),
+    [note.id],
+    ["cards", "revlog"]
+  )
   const history = view ? summarizeHistory(view.logs) : null
   const card = view?.card ?? null
   const studied = card !== null && card.reps > 0

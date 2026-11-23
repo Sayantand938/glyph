@@ -7,6 +7,7 @@ import {
 } from "@/lib/card-marks"
 
 import { db } from "../database"
+import { CARDS, getRow, putRows } from "../tables"
 
 type MarkPatch = Partial<Pick<CardMarks, "flag" | "suspended" | "buriedUntil">>
 
@@ -22,8 +23,8 @@ async function updateMarks(
   patch: MarkPatch,
   now: number
 ): Promise<void> {
-  await db.transaction("rw", db.cards, async () => {
-    const card = await db.cards.get(cardId)
+  await db.transaction(async (tx) => {
+    const card = await getRow(tx, CARDS, cardId)
     if (!card) throw new Error("Card not found.")
     const current = marksOf(card)
     const next: CardMarks = {
@@ -32,7 +33,7 @@ async function updateMarks(
       markedAt: Math.max(now, current.markedAt + 1),
     }
     if (sameMarks({ ...next, markedAt: current.markedAt }, current)) return
-    await db.cards.put({ ...card, ...next })
+    await putRows(tx, CARDS, [{ ...card, ...next }])
   })
 }
 

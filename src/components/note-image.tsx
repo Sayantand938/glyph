@@ -1,5 +1,4 @@
-import { useLiveQuery } from "dexie-react-hooks"
-
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadImageView } from "@/db/queries"
 import { cn } from "@/lib/utils"
 
@@ -19,7 +18,7 @@ export function NoteImage({
   className?: string
 }) {
   // undefined while loading, null when there is no such image.
-  const image = useLiveQuery(() => loadImageView(id), [id])
+  const image = useLiveQuery(() => loadImageView(id), [id], ["images"])
 
   if (image === null) {
     return (

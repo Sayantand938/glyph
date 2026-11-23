@@ -1,7 +1,7 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { db } from "@/db/database"
+import { useLiveQuery } from "@/hooks/use-live-query"
+import { loadSettings } from "@/db/queries"
 import { saveSetting } from "@/db/repo"
 import {
   DEFAULT_SETTINGS,
@@ -18,7 +18,7 @@ import {
  * `loaded` is false.
  */
 export function useSettings(): SettingValues & { loaded: boolean } {
-  const rows = useLiveQuery(() => db.settings.toArray(), [])
+  const rows = useLiveQuery(() => loadSettings(), [], ["settings"])
   return React.useMemo(
     () => ({
       ...(rows ? resolveSettings(rows) : DEFAULT_SETTINGS),

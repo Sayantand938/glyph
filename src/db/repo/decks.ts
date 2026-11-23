@@ -1,4 +1,14 @@
 import { db } from "../database"
+import {
+  DECKS,
+  IDS,
+  NOTES,
+  addRows,
+  getRow,
+  putNotes,
+  putRows,
+  queryRows,
+} from "../tables"
 import type { Deck } from "../types"
 import { cleanName } from "./clean-name"
 
@@ -13,9 +23,9 @@ export async function createDeck(
     updatedAt: Date.now(),
     deletedAt: null,
   }
-  await db.transaction("rw", db.decks, async () => {
+  await db.transaction(async (tx) => {
     if (parentId !== null) {
-      const parent = await db.decks.get(parentId)
+      const parent = await getRow(tx, DECKS, parentId)
       if (!parent || parent.deletedAt !== null) {
         throw new Error("Parent subject not found.")
       }
@@ -23,19 +33,17 @@ export async function createDeck(
         throw new Error("Topics cannot contain other decks.")
       }
     }
-    await db.decks.add(deck)
+    await addRows(tx, DECKS, [deck])
   })
   return deck
 }
 
 export async function renameDeck(id: string, name: string): Promise<void> {
   const next = cleanName(name)
-  await db.transaction("rw", db.decks, async () => {
-    const updated = await db.decks.update(id, {
-      name: next,
-      updatedAt: Date.now(),
-    })
-    if (updated === 0) throw new Error("Deck not found.")
+  await db.transaction(async (tx) => {
+    const deck = await getRow(tx, DECKS, id)
+    if (!deck) throw new Error("Deck not found.")
+    await putRows(tx, DECKS, [{ ...deck, name: next, updatedAt: Date.now() }])
   })
 }
 
@@ -48,26 +56,32 @@ export async function softDeleteDeck(
   id: string,
   now = Date.now()
 ): Promise<void> {
-  await db.transaction("rw", [db.decks, db.notes], async () => {
-    const deck = await db.decks.get(id)
+  await db.transaction(async (tx) => {
+    const deck = await getRow(tx, DECKS, id)
     if (!deck) throw new Error("Deck not found.")
 
     const children =
       deck.parentId === null
-        ? await db.decks.where("parentId").equals(id).toArray()
+        ? await queryRows(tx, DECKS, "WHERE parentId = ?", [id])
         : []
     const doomed = [deck, ...children].filter((d) => d.deletedAt === null)
     const doomedIds = [deck.id, ...children.map((d) => d.id)]
 
-    await db.decks.bulkPut(
+    await putRows(
+      tx,
+      DECKS,
       doomed.map((d) => ({ ...d, deletedAt: now, updatedAt: now }))
     )
 
-    const notes = await db.notes.where("topicId").anyOf(doomedIds).toArray()
-    await db.notes.bulkPut(
-      notes
-        .filter((n) => n.deletedAt === null)
-        .map((n) => ({ ...n, deletedAt: now }))
+    const notes = await queryRows(
+      tx,
+      NOTES,
+      `WHERE topicId ${IDS} AND deletedAt IS NULL`,
+      [JSON.stringify(doomedIds)]
+    )
+    await putNotes(
+      tx,
+      notes.map((n) => ({ ...n, deletedAt: now }))
     )
   })
 }

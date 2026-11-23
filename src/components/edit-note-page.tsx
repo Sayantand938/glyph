@@ -1,10 +1,10 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon } from "lucide-react"
 
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
 import { NoteImage } from "@/components/note-image"
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadTagNames } from "@/db/queries"
 import { pruneImages, saveNote } from "@/db/repo"
 import type { Note } from "@/db/types"
@@ -73,7 +73,7 @@ export function EditNotePage({
   const [tagsText, setTagsText] = React.useState(() =>
     formatTags(original.tags)
   )
-  const knownTags = useLiveQuery(() => loadTagNames(), [])
+  const knownTags = useLiveQuery(() => loadTagNames(), [], ["notes"])
   const [resetFsrs, setResetFsrs] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)

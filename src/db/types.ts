@@ -105,7 +105,8 @@ export interface ImageRow {
   mime: string
   width: number
   height: number
-  blob: Blob
+  /** The picture's bytes as base64 (the same text a backup file carries). */
+  data: string
 }
 
 /** An image inside a backup file: the bytes as base64. */

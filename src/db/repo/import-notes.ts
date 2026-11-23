@@ -9,6 +9,16 @@ import {
 
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
+import type { SqlRunner } from "../sql"
+import {
+  CARDS,
+  DECKS,
+  NOTES,
+  addRows,
+  allRows,
+  getRows,
+  putNotes,
+} from "../tables"
 import type { Deck, Note } from "../types"
 import { cleanName } from "./clean-name"
 
@@ -24,11 +34,12 @@ export interface ImportTarget {
  * transaction.
  */
 async function resolveOrCreateDeck(
+  tx: SqlRunner,
   ref: DeckRef,
   parentId: string | null,
   now: number
 ): Promise<Deck> {
-  const live = (await db.decks.toArray()).filter(
+  const live = (await allRows(tx, DECKS)).filter(
     (d) => d.deletedAt === null && d.parentId === parentId
   )
 
@@ -56,7 +67,7 @@ async function resolveOrCreateDeck(
     updatedAt: now,
     deletedAt: null,
   }
-  await db.decks.add(deck)
+  await addRows(tx, DECKS, [deck])
   return deck
 }
 
@@ -73,28 +84,31 @@ export async function commitImport(
   invalidCount: number,
   now = Date.now()
 ): Promise<ImportSummary> {
-  return db.transaction("rw", [db.decks, db.notes, db.cards], async () => {
-    const subject = await resolveOrCreateDeck(target.subject, null, now)
-    const topic = await resolveOrCreateDeck(target.topic, subject.id, now)
+  return db.transaction(async (tx) => {
+    const subject = await resolveOrCreateDeck(tx, target.subject, null, now)
+    const topic = await resolveOrCreateDeck(tx, target.topic, subject.id, now)
 
     // Reading by id (not by topic) also finds tombstones for resurrection.
     const probe = planImport(rows, topic.id, new Map(), now)
     const ids = probe.toAdd.map((n) => n.id)
-    const stored = await db.notes.bulkGet(ids)
     const existing = new Map<string, Note>()
-    for (const note of stored) if (note) existing.set(note.id, note)
+    for (const note of await getRows(tx, NOTES, ids)) {
+      existing.set(note.id, note)
+    }
 
     const plan = planImport(rows, topic.id, existing, now)
 
-    await db.notes.bulkPut([...plan.toAdd, ...plan.toUpdate])
+    await putNotes(tx, [...plan.toAdd, ...plan.toUpdate])
     const newCards = plan.toAdd.map((note) => emptyCardRow(note, now))
 
     const updatedIds = plan.toUpdate.map((n) => n.id)
-    const cards = await db.cards.bulkGet(updatedIds)
-    plan.toUpdate.forEach((note, i) => {
-      if (!cards[i]) newCards.push(emptyCardRow(note, now))
-    })
-    await db.cards.bulkAdd(newCards)
+    const haveCard = new Set(
+      (await getRows(tx, CARDS, updatedIds)).map((c) => c.cardId)
+    )
+    for (const note of plan.toUpdate) {
+      if (!haveCard.has(note.id)) newCards.push(emptyCardRow(note, now))
+    }
+    await addRows(tx, CARDS, newCards)
 
     return summarize(plan, invalidCount)
   })

@@ -2,6 +2,7 @@ import { marksOf } from "@/lib/card-marks"
 
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
+import { CARDS, NOTES, getRow, putNotes, putRows } from "../tables"
 import type { Note } from "../types"
 import { deleteOrphanImages } from "./images"
 
@@ -17,8 +18,8 @@ export async function saveNote(
   { resetFsrs = false }: { resetFsrs?: boolean } = {},
   now = Date.now()
 ): Promise<Note> {
-  return db.transaction("rw", [db.notes, db.cards, db.images], async () => {
-    const existing = await db.notes.get(note.id)
+  return db.transaction(async (tx) => {
+    const existing = await getRow(tx, NOTES, note.id)
     if (!existing) throw new Error("Note not found.")
 
     const saved: Note = {
@@ -27,20 +28,22 @@ export async function saveNote(
       deletedAt: existing.deletedAt,
       contentUpdatedAt: now,
     }
-    await db.notes.put(saved)
+    await putNotes(tx, [saved])
 
-    const card = await db.cards.get(existing.id)
+    const card = await getRow(tx, CARDS, existing.id)
     if (resetFsrs || !card) {
       // A reset clears progress, not the flag or a suspend.
-      await db.cards.put({
-        ...emptyCardRow(saved, now),
-        ...(card ? marksOf(card) : {}),
-      })
+      await putRows(tx, CARDS, [
+        {
+          ...emptyCardRow(saved, now),
+          ...(card ? marksOf(card) : {}),
+        },
+      ])
     } else if (card.topicId !== saved.topicId) {
-      await db.cards.update(card.cardId, { topicId: saved.topicId })
+      await putRows(tx, CARDS, [{ ...card, topicId: saved.topicId }])
     }
     // Pictures the edit dropped (or a cancelled paste left behind) go too.
-    await deleteOrphanImages()
+    await deleteOrphanImages(tx)
     return saved
   })
 }
@@ -54,13 +57,12 @@ export async function saveNote(
  * users). Deleting an already deleted note does nothing.
  */
 export async function deleteNote(id: string, now = Date.now()): Promise<void> {
-  await db.transaction("rw", db.notes, async () => {
-    const note = await db.notes.get(id)
+  await db.transaction(async (tx) => {
+    const note = await getRow(tx, NOTES, id)
     if (!note) throw new Error("Question not found.")
     if (note.deletedAt !== null) return
-    await db.notes.put({
-      ...note,
-      deletedAt: Math.max(now, note.contentUpdatedAt + 1),
-    })
+    await putNotes(tx, [
+      { ...note, deletedAt: Math.max(now, note.contentUpdatedAt + 1) },
+    ])
   })
 }

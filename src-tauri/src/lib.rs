@@ -1,3 +1,5 @@
+mod sql;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -9,8 +11,16 @@ pub fn run() {
             .build(),
         )?;
       }
+      let db = sql::open(app.handle())?;
+      tauri::Manager::manage(app, db);
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![
+      sql::sql_select,
+      sql::sql_execute,
+      sql::sql_execute_many,
+      sql::sql_script
+    ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
 }

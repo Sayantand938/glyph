@@ -1,5 +1,4 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -13,6 +12,7 @@ import type { StudyScope } from "@/components/deck-tree"
 import { EditNotePage } from "@/components/edit-note-page"
 import { Button } from "@/components/ui/button"
 import { FlagGlyph } from "@/components/flag-icon"
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadBrowseItems } from "@/db/queries"
 import { buryCard, setFlag, setSuspended, unburyCard } from "@/db/repo"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
@@ -126,7 +126,8 @@ export function BrowsePage({
       loadBrowseItems(
         scopeKind && scopeId ? { kind: scopeKind, id: scopeId } : null
       ),
-    [scopeKind, scopeId]
+    [scopeKind, scopeId],
+    ["decks", "notes", "cards"]
   )
 
   const [query, setQuery] = React.useState("")

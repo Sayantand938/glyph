@@ -1,6 +1,6 @@
 # Glyph — MCQ Spaced-Repetition PWA — Status & Build Plan
 
-An offline-first, Anki-style MCQ study app. Single-user, no backend, no auth. Data lives in IndexedDB (Dexie); scheduling uses FSRS (`ts-fsrs`); devices sync by JSON backup file transfer or by a direct peer-to-peer connection on the local network (see "Device-to-device sync").
+An offline-first, Anki-style MCQ study app. Single-user, no backend, no auth. Data lives in SQLite (Dexie until 2026-11-23, see "SQLite replaces Dexie"); scheduling uses FSRS (`ts-fsrs`); devices sync by JSON backup file transfer or by a direct peer-to-peer connection on the local network (see "Device-to-device sync").
 
 **Stack (as built):** Vite 8, React 19, TypeScript (strict), Tailwind CSS v4, shadcn/ui, Dexie + `dexie-react-hooks`, `ts-fsrs`, `lucide-react`, `vite-plugin-pwa`, Vitest (dev only). The project was scaffolded on Next.js and migrated to Vite before Phase 4, so it now matches the plan's stack; see "Deviations".
 
@@ -320,9 +320,21 @@ R0-R6 are built (see "Reliability R1-R2 notes" and "Reliability R3-R6 notes" bel
 
 **Open decisions.** Add `fake-indexeddb` as a dev dependency (reason: `importBackup`, `readBackupParts`, the digest, snapshots and `writeAutoBackup` are untestable in Vitest without it; they were checked in the browser instead)? Still open. Decided in R3: the new file extension is `.glyph` (`.jsonl` when the browser cannot gzip); old `.json` files still import. Which real devices R4 and R6 get tested on (Windows only, Android, iPhone) is still open: only desktop Chrome in the app's browser pane was used.
 
-**Tauri desktop shell (2026-11-23).** Added a Tauri 2 shell in `src-tauri/` for Windows, keeping Dexie/IndexedDB (WebView2) and the PWA build for phones. `npm run tauri dev` / `npm run tauri build`. The Tauri build skips the service worker and manifest (see CLAUDE.md Gotchas). Verified: typecheck, lint, tests, `tauri build --no-bundle` succeed and the exe starts. Not verified: the installer bundle, backup download / folder picker / WebRTC sync inside WebView2, and data surviving an app update. The paragraph below predates this and is kept for the SQLite question.
+**Tauri desktop shell (2026-11-23).** Added a Tauri 2 shell in `src-tauri/` for Windows (first with Dexie and the PWA kept; both were replaced the same day, see "SQLite replaces Dexie"). `npm run tauri dev` / `npm run tauri build`. The Tauri build skips the service worker and manifest (see CLAUDE.md Gotchas). Verified: typecheck, lint, tests, `tauri build --no-bundle` succeed and the exe starts. Not verified: the installer bundle, backup download / folder picker / WebRTC sync inside WebView2, and data surviving an app update. The paragraph below predates this and is kept for the SQLite question.
 
 **Why not Tauri now.** Tauri's webviews still use IndexedDB, so on-device storage would mean SQLite and a rewrite of the Dexie layer and `repo/`. It would fix browser storage eviction and give native files, but not the sync protocol gaps (R1, R2), import safety (R5) or card merging (R7); streaming (R3) can be done in the browser. Tauri's mobile support is newer than its desktop support; if a native shell is needed later, Capacitor (the same web app plus native SQLite and filesystem plugins) is the first thing to look at.
+
+### SQLite replaces Dexie, PWA dropped (2026-11-23)
+
+The data layer moved from IndexedDB (Dexie) to a SQLite file owned by the Tauri app, and the PWA build (service worker, manifest, Vercel deploy, `vite-plugin-pwa`) was removed. `dexie`, `dexie-react-hooks` and `vite-plugin-pwa` are uninstalled; `rusqlite` (bundled SQLite) and `@tauri-apps/api` are new (rule 8: the whole point of the change).
+
+- **Bridge.** `src-tauri/src/sql.rs` exposes four commands over one connection (`sql_select`, `sql_execute`, `sql_execute_many`, `sql_script`); the file is `glyph.db` in the app data dir, WAL mode. Everything else is TypeScript: `src/db/schema.ts` (migrations by `PRAGMA user_version`), `sql.ts` (`Database`: serialized calls, `transaction`, live-query notifications), `tables.ts` (row mapping, `putRows`/`getRows`/`queryRows`, keyset paging, the `note_tags` index), `tauri-backend.ts`.
+- **Live queries.** `useLiveQuery` is ours (`src/hooks/use-live-query.ts`): it re-runs when a committed write touches a table in the list the caller passes (Dexie tracked this by itself). A new live query must list its tables.
+- **Schema.** Version 1 is the final Dexie shape (v7) as tables: tags as JSON plus `note_tags`, booleans as 0/1, `sl` and `options` as JSON, images as base64 text (`ImageRow.blob` became `data`), `deletedAt` NULL for live rows.
+- **Data.** There is no automatic copy from the old IndexedDB: export a `.glyph` backup from the old app and import it. The old localStorage settings migration (`adoptLegacySettings`) is gone with it.
+- **Tests.** The DB layer is now unit-tested (`src/db/db.test.ts`) on `node:sqlite`, the same SQL as the app: startup and seed, import, review and undo, marks surviving a review, tag edits and soft deletes, rollback, live-query notices, a full backup read merged into an empty database with equal digests, and a delta read. This also answers the old open question about `fake-indexeddb`: not needed.
+- **Removed.** `src/sim/browser-run.ts` (a manual console harness against IndexedDB); the pure simulators and their tests stay. The sim could be rebuilt on `memoryBackend()` if a big-database timing run is wanted.
+- **Verified.** typecheck, lint, 553 tests, `npm run build` clean; `tauri build --no-bundle` builds and, launched fresh, the exe created `glyph.db`, migrated it to `user_version` 1 and seeded 2 decks, 3 notes, 3 cards. **Not verified:** the screens in the running app (study, browse, import, backup export/import, sync, image paste) against SQLite; a large database (50,000 questions, years of reviews) for speed; the installer bundle.
 
 ### Reliability R1-R2 notes (built 2026-11-23)
 

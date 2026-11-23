@@ -1,11 +1,11 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { UploadIcon } from "lucide-react"
 
 import { DeleteDeckPage, RenameDeckPage } from "@/components/deck-pages"
 import { DeckTree, type StudyScope } from "@/components/deck-tree"
 import { TagList } from "@/components/tag-list"
 import { Button } from "@/components/ui/button"
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadDashboard } from "@/db/queries"
 import type { Deck } from "@/db/types"
 import { useScrollRestore } from "@/hooks/use-scroll-restore"
@@ -41,7 +41,11 @@ export function Dashboard({
     return () => clearInterval(timer)
   }, [])
 
-  const data = useLiveQuery(() => loadDashboard(now), [now])
+  const data = useLiveQuery(
+    () => loadDashboard(now),
+    [now],
+    ["decks", "notes", "cards"]
+  )
 
   const [collapsedIds, setCollapsedIds] = useStoredState<string[]>(
     "glyph.collapsed",

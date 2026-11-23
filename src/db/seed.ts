@@ -1,5 +1,6 @@
-import type { GlyphDB } from "./database"
 import { emptyCardRow } from "./scheduler"
+import type { SqlRunner } from "./sql"
+import { CARDS, DECKS, addNotes, addRows, countRows } from "./tables"
 import type { Deck, Note } from "./types"
 
 // Fixed ids so two devices that both seed merge into one sample deck
@@ -37,43 +38,47 @@ const QUESTIONS: SeedQuestion[] = [
   },
 ]
 
-/** Seeds sample data only when there are no decks at all, in one transaction. */
+/**
+ * Seeds sample data only when there are no decks at all. Call it inside a
+ * transaction so two callers can't both seed.
+ */
 export async function seedIfEmpty(
-  db: GlyphDB,
+  tx: SqlRunner,
   now = Date.now()
 ): Promise<boolean> {
-  return db.transaction("rw", [db.decks, db.notes, db.cards], async () => {
-    // Counted inside the transaction so concurrent callers (StrictMode, two tabs) can't both seed.
-    if ((await db.decks.count()) > 0) return false
+  if ((await countRows(tx, DECKS)) > 0) return false
 
-    const decks: Deck[] = [
-      {
-        id: SUBJECT_ID,
-        parentId: null,
-        name: "Sample Subject",
-        updatedAt: now,
-        deletedAt: null,
-      },
-      {
-        id: TOPIC_ID,
-        parentId: SUBJECT_ID,
-        name: "General Knowledge",
-        updatedAt: now,
-        deletedAt: null,
-      },
-    ]
-    const notes: Note[] = QUESTIONS.map((q, i) => ({
-      id: `n_seed_${i + 1}`,
-      topicId: TOPIC_ID,
-      sl: i + 1,
-      ...q,
-      contentUpdatedAt: now,
+  const decks: Deck[] = [
+    {
+      id: SUBJECT_ID,
+      parentId: null,
+      name: "Sample Subject",
+      updatedAt: now,
       deletedAt: null,
-    }))
+    },
+    {
+      id: TOPIC_ID,
+      parentId: SUBJECT_ID,
+      name: "General Knowledge",
+      updatedAt: now,
+      deletedAt: null,
+    },
+  ]
+  const notes: Note[] = QUESTIONS.map((q, i) => ({
+    id: `n_seed_${i + 1}`,
+    topicId: TOPIC_ID,
+    sl: i + 1,
+    ...q,
+    contentUpdatedAt: now,
+    deletedAt: null,
+  }))
 
-    await db.decks.bulkAdd(decks)
-    await db.notes.bulkAdd(notes)
-    await db.cards.bulkAdd(notes.map((note) => emptyCardRow(note, now)))
-    return true
-  })
+  await addRows(tx, DECKS, decks)
+  await addNotes(tx, notes)
+  await addRows(
+    tx,
+    CARDS,
+    notes.map((note) => emptyCardRow(note, now))
+  )
+  return true
 }

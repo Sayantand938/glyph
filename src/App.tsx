@@ -7,7 +7,6 @@ import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
 import { ImportPage } from "@/components/import/import-page"
 import { ImportReviewPage } from "@/components/import-review-page"
-import { PwaToast } from "@/components/pwa-toast"
 import { SettingsPage } from "@/components/settings-page"
 import { SyncPage } from "@/components/sync/sync-page"
 import { StudyOptionsPage } from "@/components/study/study-options-page"
@@ -210,8 +209,6 @@ export default function App() {
       <footer className="border-t py-3 text-xs text-muted-foreground">
         Glyph v{__APP_VERSION__}
       </footer>
-
-      <PwaToast />
     </div>
   )
 }

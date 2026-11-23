@@ -9,9 +9,12 @@
  * Order matters to the receiver: decks and settings first, then notes, then
  * cards (a card whose note is missing is dropped by the merge), then reviews,
  * then images.
+ *
+ * Each part is read in its own short transaction, so a long export never blocks
+ * the study session's writes for more than one part.
  */
 import { BACKUP_APP, BACKUP_SCHEMA_VERSION } from "@/lib/backup"
-import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
+import { imageIdsInNotes } from "@/lib/image"
 import {
   DigestBuilder,
   PART_ROWS,
@@ -25,14 +28,19 @@ import {
 } from "@/lib/sync"
 
 import { db } from "./database"
-import type {
-  BackupFile,
-  BackupImage,
-  CardRow,
-  ImageRow,
-  Note,
-  RevlogRow,
-} from "./types"
+import {
+  CARDS,
+  DECKS,
+  IMAGES,
+  NOTES,
+  REVLOG,
+  SETTINGS,
+  allKeys,
+  allRows,
+  getRows,
+  tablePages,
+} from "./tables"
+import type { BackupFile, BackupImage, ImageRow } from "./types"
 
 type Tables = Pick<
   BackupFile,
@@ -54,74 +62,77 @@ function partOf(now: number, tables: Partial<Tables>): BackupFile {
   }
 }
 
-export async function imageToBackup(row: ImageRow): Promise<BackupImage> {
+/** A stored picture as a backup carries it (the same fields, base64 data). */
+export function imageToBackup(row: ImageRow): BackupImage {
   return {
     id: row.id,
     mime: row.mime,
     width: row.width,
     height: row.height,
-    data: bytesToBase64(new Uint8Array(await row.blob.arrayBuffer())),
+    data: row.data,
   }
 }
 
+/** Rows per page when the digests walk a table. */
+const DIGEST_PAGE = 5000
+
 /**
  * A fingerprint of every table (see `SyncDigests`), equal on two devices after a
- * sync. It reads the stamps of every row, tombstones included, one row at a time
- * (a cursor, never the whole table in memory); reviews are read by key only.
- * The `images` digest covers the pictures that live notes use and this device
+ * sync. It reads the stamps of every row, tombstones included, one page at a
+ * time (never the whole table in memory); reviews are read by key only. The
+ * `images` digest covers the pictures that live notes use and this device
  * holds, so a picture that never arrived shows as a difference.
  */
 export async function computeDigests(): Promise<SyncDigests> {
-  return db.transaction(
-    "r",
-    [db.decks, db.notes, db.cards, db.revlog, db.images, db.settings],
-    async () => {
-      const decks = new DigestBuilder()
-      const notes = new DigestBuilder()
-      const cards = new DigestBuilder()
-      const reviews = new DigestBuilder()
-      const settings = new DigestBuilder()
-      const images = new DigestBuilder()
+  return db.transaction(async (tx) => {
+    const decks = new DigestBuilder()
+    const notes = new DigestBuilder()
+    const cards = new DigestBuilder()
+    const reviews = new DigestBuilder()
+    const settings = new DigestBuilder()
+    const images = new DigestBuilder()
 
-      await db.decks.each((deck) => decks.add(deckStamp(deck)))
-      const referenced = new Set<string>()
-      await db.notes.each((note) => {
+    for await (const page of tablePages(tx, DECKS, DIGEST_PAGE)) {
+      for (const deck of page) decks.add(deckStamp(deck))
+    }
+    const referenced = new Set<string>()
+    for await (const page of tablePages(tx, NOTES, DIGEST_PAGE)) {
+      for (const note of page) {
         notes.add(noteStamp(note))
         if (note.deletedAt === null) {
           for (const id of imageIdsInNotes([note])) referenced.add(id)
         }
-      })
-      await db.cards.each((card) => cards.add(cardStamp(card)))
-      for (const id of (await db.revlog
-        .toCollection()
-        .primaryKeys()) as string[]) {
-        reviews.add(idStamp(id))
-      }
-      await db.settings.each((row) => settings.add(settingStamp(row)))
-      if (referenced.size > 0) {
-        const held = new Set(
-          (await db.images.toCollection().primaryKeys()) as string[]
-        )
-        for (const id of referenced) if (held.has(id)) images.add(idStamp(id))
-      }
-
-      return {
-        decks: decks.result(),
-        notes: notes.result(),
-        cards: cards.result(),
-        reviews: reviews.result(),
-        settings: settings.result(),
-        images: images.result(),
       }
     }
-  )
+    for await (const page of tablePages(tx, CARDS, DIGEST_PAGE)) {
+      for (const card of page) cards.add(cardStamp(card))
+    }
+    for (const id of await allKeys(tx, REVLOG)) reviews.add(idStamp(id))
+    for (const row of await allRows(tx, SETTINGS)) {
+      settings.add(settingStamp(row))
+    }
+    if (referenced.size > 0) {
+      const held = new Set(await allKeys(tx, IMAGES))
+      for (const id of referenced) if (held.has(id)) images.add(idStamp(id))
+    }
+
+    return {
+      decks: decks.result(),
+      notes: notes.result(),
+      cards: cards.result(),
+      reviews: reviews.result(),
+      settings: settings.result(),
+      images: images.result(),
+    }
+  })
 }
 
 const union = (a: string[], b: string[]): string[] =>
   [...new Set([...a, ...b])].sort()
 
-function compact<T>(rows: (T | undefined)[]): T[] {
-  return rows.filter((row): row is T => row !== undefined)
+async function idsWhere(sql: string, params: (string | number)[]) {
+  const rows = await db.select(sql, params)
+  return rows.map((row) => String(row.k))
 }
 
 /**
@@ -139,11 +150,11 @@ export async function* readBackupParts(
     everything || (typeof at === "number" && at > from)
 
   // Decks and settings are tiny: one part.
-  const decks = (await db.decks.toArray()).filter(
+  const decks = (await db.transaction((tx) => allRows(tx, DECKS))).filter(
     (d) => newer(d.updatedAt) || newer(d.deletedAt)
   )
-  const settings = (await db.settings.toArray()).filter((s) =>
-    newer(s.updatedAt)
+  const settings = (await db.transaction((tx) => allRows(tx, SETTINGS))).filter(
+    (s) => newer(s.updatedAt)
   )
   if (decks.length > 0 || settings.length > 0) {
     yield partOf(now, { decks, settings })
@@ -151,90 +162,101 @@ export async function* readBackupParts(
 
   // Notes. The ids of images they use are remembered for the delta's images.
   const usedImages = new Set<string>()
-  const noteIds = everything
-    ? null
-    : union(
-        (await db.notes
-          .where("contentUpdatedAt")
-          .above(from)
-          .primaryKeys()) as string[],
-        (await db.notes
-          .where("deletedAt")
-          .above(from)
-          .primaryKeys()) as string[]
-      )
-  const takeNotes = async (notes: Note[]) => {
-    for (const id of imageIdsInNotes(notes)) usedImages.add(id)
-    return notes
-  }
-  if (noteIds === null) {
-    let last: string | undefined
+  if (everything) {
+    let last: string | null = null
     for (;;) {
-      const query =
-        last === undefined
-          ? db.notes.orderBy(":id")
-          : db.notes.where(":id").above(last)
-      const notes = await query.limit(PART_ROWS.notes).toArray()
-      if (notes.length === 0) break
-      last = notes[notes.length - 1].id
-      yield partOf(now, { notes: await takeNotes(notes) })
+      const page: BackupFile["notes"] = await db.transaction(async (tx) => {
+        const rows =
+          last === null
+            ? await tx.select("SELECT * FROM notes ORDER BY id LIMIT ?", [
+                PART_ROWS.notes,
+              ])
+            : await tx.select(
+                "SELECT * FROM notes WHERE id > ? ORDER BY id LIMIT ?",
+                [last, PART_ROWS.notes]
+              )
+        return rows.map(NOTES.fromRow)
+      })
+      if (page.length === 0) break
+      last = page[page.length - 1].id
+      for (const id of imageIdsInNotes(page)) usedImages.add(id)
+      yield partOf(now, { notes: page })
     }
   } else {
+    const noteIds = union(
+      await idsWhere("SELECT id AS k FROM notes WHERE contentUpdatedAt > ?", [
+        from,
+      ]),
+      await idsWhere("SELECT id AS k FROM notes WHERE deletedAt > ?", [from])
+    )
     for (const ids of pagesOf(noteIds, PART_ROWS.notes)) {
-      const notes = compact(await db.notes.bulkGet(ids))
-      if (notes.length > 0) yield partOf(now, { notes: await takeNotes(notes) })
+      const notes = await db.transaction((tx) => getRows(tx, NOTES, ids))
+      if (notes.length === 0) continue
+      for (const id of imageIdsInNotes(notes)) usedImages.add(id)
+      yield partOf(now, { notes })
     }
   }
 
   // Cards.
-  const cardIds = everything
-    ? null
-    : union(
-        (await db.cards
-          .where("updatedAt")
-          .above(from)
-          .primaryKeys()) as string[],
-        (await db.cards.where("markedAt").above(from).primaryKeys()) as string[]
-      )
-  if (cardIds === null) {
-    let last: string | undefined
+  if (everything) {
+    let last: string | null = null
     for (;;) {
-      const query =
-        last === undefined
-          ? db.cards.orderBy(":id")
-          : db.cards.where(":id").above(last)
-      const cards: CardRow[] = await query.limit(PART_ROWS.cards).toArray()
-      if (cards.length === 0) break
-      last = cards[cards.length - 1].cardId
-      yield partOf(now, { cards })
+      const page: BackupFile["cards"] = await db.transaction(async (tx) => {
+        const rows =
+          last === null
+            ? await tx.select("SELECT * FROM cards ORDER BY cardId LIMIT ?", [
+                PART_ROWS.cards,
+              ])
+            : await tx.select(
+                "SELECT * FROM cards WHERE cardId > ? ORDER BY cardId LIMIT ?",
+                [last, PART_ROWS.cards]
+              )
+        return rows.map(CARDS.fromRow)
+      })
+      if (page.length === 0) break
+      last = page[page.length - 1].cardId
+      yield partOf(now, { cards: page })
     }
   } else {
+    const cardIds = union(
+      await idsWhere("SELECT cardId AS k FROM cards WHERE updatedAt > ?", [
+        from,
+      ]),
+      await idsWhere("SELECT cardId AS k FROM cards WHERE markedAt > ?", [from])
+    )
     for (const ids of pagesOf(cardIds, PART_ROWS.cards)) {
-      const cards = compact(await db.cards.bulkGet(ids))
+      const cards = await db.transaction((tx) => getRows(tx, CARDS, ids))
       if (cards.length > 0) yield partOf(now, { cards })
     }
   }
 
   // Reviews (never edited, so "newer" is simply "recorded after").
   if (everything) {
-    let last: string | undefined
+    let last: string | null = null
     for (;;) {
-      const query =
-        last === undefined
-          ? db.revlog.orderBy(":id")
-          : db.revlog.where(":id").above(last)
-      const revlog: RevlogRow[] = await query.limit(PART_ROWS.revlog).toArray()
-      if (revlog.length === 0) break
-      last = revlog[revlog.length - 1].id
-      yield partOf(now, { revlog })
+      const page: BackupFile["revlog"] = await db.transaction(async (tx) => {
+        const rows =
+          last === null
+            ? await tx.select("SELECT * FROM revlog ORDER BY id LIMIT ?", [
+                PART_ROWS.revlog,
+              ])
+            : await tx.select(
+                "SELECT * FROM revlog WHERE id > ? ORDER BY id LIMIT ?",
+                [last, PART_ROWS.revlog]
+              )
+        return rows.map(REVLOG.fromRow)
+      })
+      if (page.length === 0) break
+      last = page[page.length - 1].id
+      yield partOf(now, { revlog: page })
     }
   } else {
-    const ids = (await db.revlog
-      .where("reviewedAt")
-      .above(from)
-      .primaryKeys()) as string[]
+    const ids = await idsWhere(
+      "SELECT id AS k FROM revlog WHERE reviewedAt > ?",
+      [from]
+    )
     for (const page of pagesOf(ids, PART_ROWS.revlog)) {
-      const revlog = compact(await db.revlog.bulkGet(page))
+      const revlog = await db.transaction((tx) => getRows(tx, REVLOG, page))
       if (revlog.length > 0) yield partOf(now, { revlog })
     }
   }
@@ -242,11 +264,10 @@ export async function* readBackupParts(
   // Images: those the sent notes use (a device that already has one ignores it),
   // or all of them in a full sync.
   const imageIds = everything
-    ? ((await db.images.toCollection().primaryKeys()) as string[])
+    ? await db.transaction((tx) => allKeys(tx, IMAGES))
     : [...usedImages]
   for (const ids of pagesOf(imageIds, PART_ROWS.images)) {
-    const rows = compact(await db.images.bulkGet(ids))
-    if (rows.length === 0) continue
-    yield partOf(now, { images: await Promise.all(rows.map(imageToBackup)) })
+    const rows = await db.transaction((tx) => getRows(tx, IMAGES, ids))
+    if (rows.length > 0) yield partOf(now, { images: rows.map(imageToBackup) })
   }
 }

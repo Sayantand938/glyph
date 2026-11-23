@@ -1,8 +1,7 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { db } from "@/db/database"
-import { loadReviewRecords } from "@/db/queries"
+import { useLiveQuery } from "@/hooks/use-live-query"
+import { countReviews, loadReviewRecords } from "@/db/queries"
 import { saveSetting } from "@/db/repo"
 import { buildSequences, optimizeWeights, shouldAutoFit } from "@/lib/fsrs"
 
@@ -28,7 +27,7 @@ const QUIET_MS = 15_000
  */
 export function useAutoFit(paused: boolean): void {
   const { autoFit, fit, loaded } = useSettings()
-  const reviews = useLiveQuery(() => db.revlog.count(), [])
+  const reviews = useLiveQuery(() => countReviews(), [], ["revlog"])
   const baseline = fit.weights
   const lastFitReviews = fit.reviews
 

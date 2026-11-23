@@ -1,9 +1,19 @@
-import { base64ToBytes } from "@/lib/image"
 import type { MergeStats } from "@/lib/backup"
 
-import { MERGE_TABLES, planMerge, type IncomingBackup } from "../backup-local"
+import { planMerge, type IncomingBackup } from "../backup-local"
 import { db } from "../database"
 import { emptyCardRow } from "../scheduler"
+import {
+  CARDS,
+  DECKS,
+  IMAGES,
+  NOTES,
+  REVLOG,
+  SETTINGS,
+  clearTable,
+  putNotes,
+  putRows,
+} from "../tables"
 
 /**
  * Merges a parsed backup into the database in one transaction (see
@@ -14,12 +24,12 @@ import { emptyCardRow } from "../scheduler"
 export async function importBackup(
   incoming: IncomingBackup
 ): Promise<MergeStats> {
-  return db.transaction("rw", MERGE_TABLES, async () => {
+  return db.transaction(async (tx) => {
     const {
       result: { merged, write, stats },
       newImages,
       newSettings,
-    } = await planMerge(incoming)
+    } = await planMerge(tx, incoming)
 
     const haveCard = new Set(merged.cards.map((c) => c.cardId))
     // A stand-in card for a note that has none (its card may arrive in a later
@@ -31,20 +41,12 @@ export async function importBackup(
       .filter((n) => n.deletedAt === null && !haveCard.has(n.id))
       .map((n) => emptyCardRow(n, 0))
 
-    await db.settings.bulkPut(newSettings)
-    await db.decks.bulkPut(write.decks)
-    await db.notes.bulkPut(write.notes)
-    await db.cards.bulkPut([...write.cards, ...repaired])
-    await db.revlog.bulkPut(write.revlog)
-    await db.images.bulkPut(
-      newImages.map((image) => ({
-        id: image.id,
-        mime: image.mime,
-        width: image.width,
-        height: image.height,
-        blob: new Blob([base64ToBytes(image.data)], { type: image.mime }),
-      }))
-    )
+    await putRows(tx, SETTINGS, newSettings)
+    await putRows(tx, DECKS, write.decks)
+    await putNotes(tx, write.notes)
+    await putRows(tx, CARDS, [...write.cards, ...repaired])
+    await putRows(tx, REVLOG, write.revlog)
+    await putRows(tx, IMAGES, newImages)
     return {
       ...stats,
       imagesAdded: newImages.length,
@@ -59,7 +61,9 @@ export async function importBackup(
  * merged into the empty database right after, which reproduces it exactly.
  */
 export async function clearAllData(): Promise<void> {
-  await db.transaction("rw", MERGE_TABLES, async () => {
-    await Promise.all(MERGE_TABLES.map((table) => table.clear()))
+  await db.transaction(async (tx) => {
+    for (const table of [DECKS, NOTES, CARDS, REVLOG, IMAGES, SETTINGS]) {
+      await clearTable(tx, table)
+    }
   })
 }

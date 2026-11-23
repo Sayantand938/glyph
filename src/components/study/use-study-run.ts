@@ -1,6 +1,6 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
+import { useLiveQuery } from "@/hooks/use-live-query"
 import { loadStudyCard, loadStudyCards, type StudyCardView } from "@/db/queries"
 import {
   applyReview,
@@ -97,7 +97,8 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
       id: cardId,
       view: cardId ? await loadStudyCard(cardId) : null,
     }),
-    [cardId]
+    [cardId],
+    ["notes", "cards"]
   )
   const ready = loaded && loaded.id === cardId ? loaded : null
   const data: StudyCardView | null = ready?.view ?? null

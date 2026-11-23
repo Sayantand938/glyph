@@ -1,10 +1,10 @@
 import * as React from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon, CheckIcon } from "lucide-react"
 
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import { db } from "@/db/database"
+import { useLiveQuery } from "@/hooks/use-live-query"
+import { loadDecks, loadTopicNotes } from "@/db/queries"
 import { commitImport } from "@/db/repo"
 import type { Note } from "@/db/types"
 import {
@@ -42,7 +42,7 @@ export function ImportPage({
   const [commitError, setCommitError] = React.useState<string | null>(null)
   const [result, setResult] = React.useState<ImportSummary | null>(null)
 
-  const decks = useLiveQuery(() => db.decks.toArray(), [])
+  const decks = useLiveQuery(() => loadDecks(), [], ["decks"])
   const liveDecks = (decks ?? []).filter((d) => d.deletedAt === null)
   const subjects = liveDecks.filter((d) => d.parentId === null)
 
@@ -57,10 +57,9 @@ export function ImportPage({
   const existingTopicId = topicRef?.kind === "existing" ? topicRef.id : null
   const storedNotes = useLiveQuery(
     () =>
-      existingTopicId
-        ? db.notes.where("topicId").equals(existingTopicId).toArray()
-        : [],
-    [existingTopicId]
+      existingTopicId ? loadTopicNotes(existingTopicId) : Promise.resolve([]),
+    [existingTopicId],
+    ["notes"]
   )
 
   // A new topic has no id yet; ids only matter for grouping duplicates here.
