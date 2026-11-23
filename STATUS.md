@@ -286,8 +286,45 @@ Pure restructuring, no behavior change. The four largest modules became director
 - **Keyboard.** One window `keydown` listener in the capture phase; a handled key gets `preventDefault` (this also stops the global `d` theme hotkey when `D` picks an option) and `stopPropagation` (so an Escape that opens the exit dialog isn't also seen by the dialog's own Escape handler). Shortcuts are ignored while an edit/exit dialog is open, while typing in a field, with modifier keys, and on key repeat. Space/Enter are left to a focused button, and the session drops focus after a click on an option or Undo so Space still means Next/Good.
 - **Edge cases.** A card whose note was deleted mid-session shows "This question is no longer available" with a Skip button. If a write fails (for example ts-fsrs rejecting a hand-edited card with an invalid memory state) the error is shown in the session and nothing advances. Between cards there is a brief "Loading..." while the live query resolves.
 
+### Reliability plan: backup, import and sync (planned, 2026-11-23)
+
+Nothing here is built yet. It comes from a read-through of `src/lib/backup/`, `src/lib/sync/`, `src/db/backup-parts.ts`, `use-backup-controls.tsx` and `use-peer-sync.ts`; the findings were read from the code, not reproduced (Phase R0 reproduces them first). The bulk JSON importer was not reviewed in depth. Phases are named R0-R7 so they do not clash with the build phases above.
+
+**Findings**
+
+- **Sync (1): delta uses change time, not receipt time.** A row merged from device B keeps its old `updatedAt`. If A later syncs with C and C's mark is more than 2 days newer than that stamp, the row is not sent. The end-of-sync check only compares row counts (decks, notes, cards, reviews), so an update to an existing row (note edit, flag, deck rename, setting) passes unnoticed and C stays stale. Needs a third device, a device offline more than 2 days, or a backup file restored before syncing.
+- **Sync (2): images and settings are not verified.** A delta sends images only for changed notes, so a device missing the picture of an unchanged note never gets it.
+- **Sync (3): no stall handling.** After connecting there is no idle timeout or wake lock; a sleeping phone leaves the other device on "syncing" forever. Studying during a sync can skew the counts.
+- **Sync (4): connection.** No ICE servers, so browsers that hide local addresses behind mDNS `.local` names can fail on some Android, hotspot and VPN networks; the only message is the generic timeout one.
+- **Sync (5): smaller.** Two devices reviewing the same card offline keep both reviews in the log but only the later one's card state; an undo can be resurrected by the next sync.
+- **Backup (1): not streaming.** Export builds one JSON string from every table; import does `file.text()` + `JSON.parse` + one transaction. At the project's own two-year estimate this fails with "ran out of memory". Sync already streams in parts; the file path does not.
+- **Backup (2): no safety net.** No last-backup date, reminder or auto-backup; IndexedDB is the only copy, and persistent storage is only requested (iOS may still evict it). Blob downloads are unreliable in an iOS home-screen app.
+- **Backup (3): no integrity check** beyond valid JSON (no checksum or counts in the file).
+- **Import (4): blind.** The merge starts as soon as a file is picked: no preview, no pre-import snapshot, no undo; a file from a wrong-clock device can overwrite newer edits.
+- **Import (5): all or nothing.** One bad row rejects the whole file, with no way to recover the rest.
+
+**Phases.** Every phase ends with `npm run typecheck`, `lint`, `test` and `build` clean, this file updated, and one commit.
+
+| Phase | Scope | Tests | State |
+|---|---|---|---|
+| R0 | Baseline and failing tests. Get the working tree green and committed first (about 20 files of FSRS and backup work were uncommitted when this plan was written). Make the fake devices in `sync-session.test.ts` carry change stamps and filter deltas like `readBackupParts`. | Three tests that fail for the stated reason: the three-device stale edit (laptop offline 3 days, laptop to phone to tablet); restore a backup file then sync; an unchanged note whose image never arrives. | Planned |
+| R1 | Content digest. Pure `RowDigest` (count plus order-independent hash of id + change stamp) in `lib/sync/delta.ts`; `computeDigest` in `backup-parts.ts`; the `ok` message carries digests; `SYNC_VERSION` 3; digest also covers settings and the images live notes reference. A mismatch triggers the existing full repeat round; one still different after a full round fails and names the table. | Digest ignores row order and changes when one stamp changes; the R0 tests now pass; two-tab browser run on 5,000 notes; timing on 50,000 notes (the digest must stay cheap); a deliberately corrupted row is caught and healed. | Planned |
+| R2 | Liveness. No-progress watchdog in `SyncSession` (injected timer, about 30 s); `navigator.wakeLock` while syncing; study screen locked during a sync. | Fake-timer unit tests: a stalled peer fails, steady progress never trips it, a slow large sync passes. Manual: sleep one device mid-sync and see a clear error. | Planned |
+| R3 | Streaming, checksummed backup file. Header line, one part per line (from `readBackupParts(null)`), footer line with counts and digest, gzipped (`CompressionStream`). Streaming reader runs each part through `parseBackup` + `importBackup`; a format sniffer keeps old single-JSON files importing. A streamed import is not one transaction; it is safe to re-run because the merge is idempotent (small files may keep the single transaction). | Round trip gives the same digest as the old path; truncated file, flipped byte and missing footer are caught; v1-v6 fixtures still import; 50,000 questions and 116k reviews in the browser, peak memory and time against the 24 s restore baseline. | Planned |
+| R4 | Backup safety net. Last-export date in Settings > Data (per device, localStorage), a "due" reminder, optional auto-backup to a folder chosen with `showDirectoryPicker`, share-sheet fallback for iOS. | Pure `backupDue(lastAt, changes, now)` unit tests (including a clock change); manual on Chrome, and on a real iPhone if available. | Planned |
+| R5 | Safer imports. Snapshot into the origin-private file system before every file import (keep the last 3) with an "undo import" button; a skip-bad-rows mode with a report; a preview from `mergeBackup` stats for small files. | Lenient parsing as a pure unit test; undo checked by digest (after undo equals before import); browser run: import, undo, import again. | Planned |
+| R6 | Connection diagnostics. Pure analysis of the candidates in the pairing code (all `.local`, no usable address), clearer errors, an off-by-default "use a public STUN server" switch (breaks the no-outside-calls rule, so it is opt-in and per device). | Unit tests on captured SDP samples; manual matrix: same wifi, phone hotspot, VPN. | Planned |
+| R7 | Later, if wanted: rebuild a card from both devices' reviews when they reviewed it offline; stop an undo being resurrected by a sync; then decide on Capacitor or Tauri from real-device evidence (R4, R6). | - | Not started |
+
+**Order.** R1 first: it is the highest value, and R5's undo test uses the digest as its oracle. R1-R2 touch only sync and R3-R5 only backup, so they could run in parallel, but the plan is to go in order.
+
+**Open decisions.** Add `fake-indexeddb` as a dev dependency (reason: `importBackup`, `readBackupParts` and the digest are untestable in Vitest without it; today only `src/sim/browser-run.ts` reaches the DB)? New backup file extension (`.glyph`) or keep `.json`? Which real devices will R4 and R6 be tested on (Windows only, Android, iPhone)?
+
+**Why not Tauri now.** Tauri's webviews still use IndexedDB, so on-device storage would mean SQLite and a rewrite of the Dexie layer and `repo/`. It would fix browser storage eviction and give native files, but not the sync protocol gaps (R1, R2), import safety (R5) or card merging (R7); streaming (R3) can be done in the browser. Tauri's mobile support is newer than its desktop support; if a native shell is needed later, Capacitor (the same web app plus native SQLite and filesystem plugins) is the first thing to look at.
+
 ### Next steps
 
+0. Reliability plan above (R0 first).
 1. Replace the placeholder PWA icons in `public/icons/` (192, 512, maskable-512, apple-touch-icon) with real art.
 2. Install the production build as a PWA on a phone (Android and iOS) and repeat the offline check there; the manual test script's items 14-15 were only checked in the desktop browser pane.
 3. Images in the bulk JSON importer (see "Images in questions").
