@@ -41,6 +41,16 @@ The header's Import JSON / Export Backup / Import Backup buttons and menu (`head
 
 Settings > Scheduling has a Desired retention slider (70-97%, default 85%, was ts-fsrs's 90%) and a reset button. The value is a per-device preference in localStorage (`glyph.retention`, via `hooks/use-retention.ts`), like the theme, so it is not part of backups and does not sync. `db/scheduler.ts` keeps one `fsrs` instance per retention value (`schedulerFor`) and `grade`, `previewIntervals` and `applyReview` take a trailing `retention` argument that defaults to `DEFAULT_RETENTION`; `use-study-run.ts` passes the stored value. It affects only future reviews; existing due dates are not recomputed. The `src/sim/` runs use the 85% default.
 
+### LaTeX in questions (after Phase 7)
+
+Question text, option text and the explanation (`extra`) now render LaTeX with KaTeX. Four delimiter forms are always accepted: `$...$` and `$$...$$`, and `\(...\)` and `\[...\]`. `$...$` is the default, i.e. the form to use in docs and sample data (`sample-data/math-sample.json` exercises all four); there is no setting to turn any of them off.
+
+- `src/lib/math.ts` (`splitMath`, pure, 16 tests in `math.test.ts`) splits text into text/math segments. Because `$` is also a currency sign, inline `$...$` follows the Pandoc rules: the opening `$` must be followed by a non-space, the closing `$` must follow a non-space and not be followed by a digit, so "costs $5 or $10" stays text. `\$` is a literal dollar sign; unclosed, empty or blank-line-spanning spans stay as plain text.
+- `src/components/rich-text.tsx` (`RichText`) renders the segments; math is drawn by `katex.render` into a ref (not `dangerouslySetInnerHTML`, rule 10), with `throwOnError: false`, `trust: false`, `strict: "ignore"` and a fallback to the raw text if KaTeX throws. Used in `question-view.tsx` and `option-button.tsx`.
+- Stored note text is unchanged (still the raw string with delimiters), so hashing, `noteId`, import, backup and the editor are unaffected. The edit modal and import preview show the raw text, not rendered math.
+- New dependency (rule 8): `katex` (+ `@types/katex` dev), the only practical offline renderer with no network calls. Its CSS and fonts are bundled by Vite; the woff2 fonts are in the service-worker precache (18 -> 37 entries, ~1.2 MB), so math works offline. The JS bundle grew to ~850 kB (270 kB gzip); code-splitting KaTeX is possible if that matters.
+- Verified in the browser (dev server): all four delimiters in question, options and explanation, currency text left alone, `\$` escape, display math centred, no console errors. Not exercised: the production build offline, a real phone, or very wide display formulas on a narrow screen (display math scrolls horizontally).
+
 ### Refactor: smaller files (after Phase 7)
 
 Pure restructuring, no behavior change. The four largest modules became directories; import paths for `@/lib/backup`, `@/lib/importer` and `@/db/repo` are unchanged (barrel `index.ts`). Phase notes below still name the old single files.

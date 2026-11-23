@@ -1,0 +1,6 @@
+[
+  { "sl": 1, "questions": "What is $\\frac{d}{dx} x^2$?", "op1": "$x$", "op2": "$2x$", "op3": "$x^2$", "op4": "$2$", "answer": "op2", "extra": "Power rule: $\\frac{d}{dx} x^n = n x^{n-1}$." },
+  { "sl": 2, "questions": "Which value solves \\(x^2 - 5x + 6 = 0\\)?", "op1": "\\(x = 1\\)", "op2": "\\(x = 4\\)", "op3": "\\(x = 2\\)", "op4": "\\(x = 5\\)", "answer": "op3", "extra": "It factors as \\((x-2)(x-3)=0\\), so $x = 2$ or $x = 3$." },
+  { "sl": 3, "questions": "Evaluate the integral:\n$$\\int_0^1 x\\,dx$$", "op1": "$0$", "op2": "$\\frac{1}{2}$", "op3": "$1$", "op4": "$2$", "answer": "op2", "extra": "\\[ \\int_0^1 x\\,dx = \\left[\\frac{x^2}{2}\\right]_0^1 = \\frac{1}{2} \\]" },
+  { "sl": 4, "questions": "A book costs $5 and a pen costs $10. What is the total in dollars?", "op1": "$12", "op2": "$15", "op3": "$20", "op4": "$50", "answer": "op2", "extra": "Currency stays plain text; math is $5 + 10 = 15$. A literal dollar sign can be written \\$." }
+]
