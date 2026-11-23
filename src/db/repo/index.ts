@@ -10,7 +10,7 @@ export {
   unburyCard,
 } from "./cards"
 export { createDeck, renameDeck, softDeleteDeck } from "./decks"
-export { importBackup } from "./import-backup"
+export { clearAllData, importBackup } from "./import-backup"
 export { addImage, pruneImages } from "./images"
 export { commitImport, type ImportTarget } from "./import-notes"
 export { deleteNote, saveNote } from "./notes"

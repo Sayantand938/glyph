@@ -1,11 +1,18 @@
 import * as React from "react"
-import { CheckCircle2Icon, CopyIcon, Loader2Icon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  CopyIcon,
+  Loader2Icon,
+} from "lucide-react"
 
 import { copyText } from "@/components/browse/copy-text"
 import { PageShell } from "@/components/page-shell"
 import { CodeEntry } from "@/components/sync/code-entry"
 import { Button } from "@/components/ui/button"
 import { usePeerSync } from "@/hooks/use-peer-sync"
+import { useStoredState } from "@/hooks/use-stored-state"
+import { PUBLIC_STUN_URL } from "@/lib/sync/rtc"
 import { formatMergeSummary } from "@/lib/backup"
 
 function Step({
@@ -67,6 +74,48 @@ function ShowCode({ code }: { code: string }) {
   )
 }
 
+function Warning({ text }: { text: string | null }) {
+  if (!text) return null
+  return (
+    <p role="alert" className="flex items-start gap-2 text-xs text-destructive">
+      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+      {text}
+    </p>
+  )
+}
+
+/** The one switch that makes this page call the internet; off unless chosen. */
+function StunOption({
+  on,
+  onChange,
+}: {
+  on: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+      <input
+        type="checkbox"
+        className="mt-1"
+        checked={on}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="space-y-1">
+        <span className="block font-medium">Use a public STUN server</span>
+        <span className="block text-xs text-muted-foreground">
+          Off by default, so nothing leaves your network. Turn it on, on both
+          devices, if they are on different networks or cannot find each other.
+          This device then asks{" "}
+          {PUBLIC_STUN_URL.replace(/^stun:/, "").replace(/:\d+$/, "")} for its
+          public address, which tells that server your IP address. Your
+          questions and progress are never sent there; they still go straight
+          between the devices.
+        </span>
+      </span>
+    </label>
+  )
+}
+
 function Waiting({ children }: { children: React.ReactNode }) {
   return (
     <p
@@ -85,7 +134,13 @@ function Waiting({ children }: { children: React.ReactNode }) {
  * chat or notes app), then connect directly and merge each other's data. See `use-peer-sync.ts`.
  */
 export function SyncPage({ onBack }: { onBack: () => void }) {
-  const sync = usePeerSync()
+  // Per device, off by default: it is the one thing here that calls out.
+  const [stun, setStun] = useStoredState<boolean>(
+    "glyph.syncStun",
+    false,
+    (stored) => (typeof stored === "boolean" ? stored : null)
+  )
+  const sync = usePeerSync({ stun })
   const { phase } = sync
   const [joining, setJoining] = React.useState(false)
 
@@ -135,6 +190,7 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
     >
       {phase.name === "idle" && !joining && (
         <div className="space-y-4">
+          <StunOption on={stun} onChange={setStun} />
           <p className="text-sm text-muted-foreground">
             Pick one device to start, and join from the other. After a sync both
             devices have the same questions and progress; where both changed the
@@ -157,9 +213,12 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
       )}
 
       {phase.name === "idle" && joining && (
-        <Step n={1} title="Paste the code from the first device">
-          <CodeEntry onCode={sync.join} />
-        </Step>
+        <div className="space-y-4">
+          <StunOption on={stun} onChange={setStun} />
+          <Step n={1} title="Paste the code from the first device">
+            <CodeEntry onCode={sync.join} />
+          </Step>
+        </div>
       )}
 
       {phase.name === "working" && <Waiting>Preparing a connection...</Waiting>}
@@ -172,6 +231,7 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
               the other device open Sync, choose Join and paste it.
             </p>
             <ShowCode code={phase.code} />
+            <Warning text={phase.warning} />
           </Step>
           <Step n={2} title="Paste the reply it gives you">
             <CodeEntry onCode={sync.accept} />
@@ -185,6 +245,7 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
             Copy it and paste it on the first device. The sync starts by itself.
           </p>
           <ShowCode code={phase.code} />
+          <Warning text={phase.warning} />
           <Waiting>Waiting for the first device...</Waiting>
         </Step>
       )}
@@ -232,9 +293,16 @@ export function SyncPage({ onBack }: { onBack: () => void }) {
       )}
 
       {phase.name === "error" && (
-        <p role="alert" className="text-sm text-destructive">
-          {phase.message}
-        </p>
+        <div role="alert" className="space-y-2 text-sm">
+          <p className="text-destructive">{phase.message}</p>
+          {phase.details && phase.details.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {phase.details.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </PageShell>
   )

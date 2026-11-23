@@ -59,3 +59,48 @@ export function formatMergeSummary(stats: MergeStats): string {
   }
   return text
 }
+
+/** Whether a merge changed (or would change) anything on this device. */
+export function hasChanges(stats: MergeStats): boolean {
+  return (
+    stats.decksAdded +
+      stats.decksUpdated +
+      stats.notesAdded +
+      stats.notesUpdated +
+      stats.cardsUpdated +
+      stats.reviewsAdded +
+      stats.imagesAdded +
+      stats.settingsUpdated >
+    0
+  )
+}
+
+const TABLE_LABELS: Record<string, [string, string]> = {
+  decks: ["deck", "decks"],
+  notes: ["question", "questions"],
+  cards: ["card", "cards"],
+  revlog: ["review", "reviews"],
+  images: ["image", "images"],
+  settings: ["setting", "settings"],
+}
+
+/**
+ * "Left out 2 rows that were not valid (1 question, 1 review): notes[3] in part
+ * 2, ..." for a lenient import; "" when nothing was left out.
+ */
+export function formatSkipped(
+  skipped: Record<string, number>,
+  examples: readonly string[]
+): string {
+  const total = Object.values(skipped).reduce((a, b) => a + b, 0)
+  if (total === 0) return ""
+  const kinds = Object.entries(skipped)
+    .filter(([, n]) => n > 0)
+    .map(([table, n]) => {
+      const [one, many] = TABLE_LABELS[table] ?? [table, table]
+      return plural(n, one, many)
+    })
+  const more = total > examples.length ? ", ..." : ""
+  const where = examples.length > 0 ? `: ${examples.join(", ")}${more}` : ""
+  return `Left out ${plural(total, "row")} that ${total === 1 ? "was" : "were"} not valid (${kinds.join(", ")})${where}.`
+}

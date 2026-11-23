@@ -2,16 +2,20 @@ import * as React from "react"
 import { ListIcon, SettingsIcon } from "lucide-react"
 
 import { BrowsePage } from "@/components/browse/browse-page"
+import { BackupReminder } from "@/components/backup-status"
 import { Dashboard } from "@/components/dashboard"
 import type { StudyScope } from "@/components/deck-tree"
 import { ImportPage } from "@/components/import/import-page"
+import { ImportReviewPage } from "@/components/import-review-page"
 import { PwaToast } from "@/components/pwa-toast"
 import { SettingsPage } from "@/components/settings-page"
 import { SyncPage } from "@/components/sync/sync-page"
 import { StudyOptionsPage } from "@/components/study/study-options-page"
 import { StudySession } from "@/components/study/study-session"
 import { Button } from "@/components/ui/button"
+import { useAutoBackup } from "@/hooks/use-auto-backup"
 import { useAutoFit } from "@/hooks/use-auto-fit"
+import { useBackupStatus } from "@/hooks/use-backup-status"
 import { useBackupControls, type Notice } from "@/hooks/use-backup-controls"
 import { useSyncRunning } from "@/hooks/use-sync-running"
 import { formatSummary } from "@/lib/importer"
@@ -39,6 +43,10 @@ export default function App() {
   useAutoFit(studying !== null || syncOpen)
   // A sync in another tab of this app: studying waits (see `useSyncRunning`).
   const syncRunning = useSyncRunning()
+  // Backups: a reminder when one is due, and the optional automatic folder copy
+  // (not while studying or syncing).
+  const auto = useAutoBackup(studying !== null || syncOpen || syncRunning)
+  const backupStatus = useBackupStatus(backup.busy)
 
   return (
     <div
@@ -52,6 +60,7 @@ export default function App() {
           glyph<span className="animate-pulse">_</span>
         </h1>
         {!importOpen &&
+          !backup.review &&
           !syncOpen &&
           !studying &&
           !picking &&
@@ -87,7 +96,7 @@ export default function App() {
       </header>
 
       <main className="flex flex-1 flex-col">
-        {notice && !importOpen && (
+        {notice && !importOpen && !backup.review && (
           <div
             role={notice.tone === "error" ? "alert" : "status"}
             className="mt-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
@@ -103,6 +112,20 @@ export default function App() {
           </div>
         )}
 
+        {!studying &&
+          !picking &&
+          !importOpen &&
+          !syncOpen &&
+          !browsing &&
+          !settingsOpen && (
+            <BackupReminder
+              status={backupStatus}
+              auto={auto}
+              busy={backup.busy}
+              onExport={() => void backup.exportFile()}
+            />
+          )}
+
         {syncRunning && (studying || picking) && (
           <p
             role="status"
@@ -113,7 +136,13 @@ export default function App() {
           </p>
         )}
 
-        {syncOpen ? (
+        {backup.review ? (
+          <ImportReviewPage
+            review={backup.review}
+            onConfirm={backup.confirmReview}
+            onCancel={backup.cancelReview}
+          />
+        ) : syncOpen ? (
           <SyncPage onBack={() => setSyncOpen(false)} />
         ) : importOpen ? (
           <ImportPage
@@ -146,6 +175,13 @@ export default function App() {
         ) : settingsOpen ? (
           <SettingsPage
             busy={backup.busy}
+            status={backupStatus}
+            auto={auto}
+            snapshots={backup.snapshots}
+            onRestore={backup.startRestore}
+            onRemoveSnapshot={(meta) => void backup.removeSnapshot(meta)}
+            shareReady={backup.shareReady}
+            onShare={() => void backup.shareNow()}
             onBack={() => {
               setNotice(null)
               setSettingsOpen(false)

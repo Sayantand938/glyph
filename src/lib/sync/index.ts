@@ -57,3 +57,15 @@ export {
   type SyncIO,
   type SyncProgress,
 } from "./session"
+export {
+  analyzeSdp,
+  classifyAddress,
+  codeWarning,
+  comparePeers,
+  connectFailureMessage,
+  describeAnalysis,
+  parseCandidates,
+  type Analysis,
+  type Candidate,
+  type Comparison,
+} from "./diagnose"

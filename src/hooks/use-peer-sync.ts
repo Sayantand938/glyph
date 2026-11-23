@@ -11,8 +11,13 @@ import {
 } from "@/lib/backup"
 import {
   SyncSession,
+  analyzeSdp,
+  codeWarning,
+  connectFailureMessage,
+  describeAnalysis,
   parseMarks,
   withMark,
+  type Analysis,
   type SyncDeps,
   type SyncMode,
   type SyncProgress,
@@ -31,13 +36,13 @@ export type SyncPhase =
   /** Building a pairing code. */
   | { name: "working" }
   /** The starting device shows its code and waits for the other's reply. */
-  | { name: "offer"; code: string }
+  | { name: "offer"; code: string; warning: string | null }
   /** The joining device shows its reply and waits for the other to paste it. */
-  | { name: "answer"; code: string }
+  | { name: "answer"; code: string; warning: string | null }
   | { name: "connecting" }
   | { name: "syncing"; progress: SyncProgress | null }
   | { name: "done"; stats: MergeStats; modes: SyncMode[]; rounds: number }
-  | { name: "error"; message: string }
+  | { name: "error"; message: string; details?: string[] }
 
 /** How long the starting device waits after the reply before giving up. */
 const CONNECT_TIMEOUT_MS = 25_000
@@ -54,10 +59,18 @@ interface Attempt {
   timer: ReturnType<typeof setTimeout> | null
   /** Gives back the screen wake lock and the sync lock (see `keepSyncRunning`). */
   release: (() => void) | null
+  /** What each device's code says about its network (for a failure message). */
+  mine: Analysis | null
+  theirs: Analysis | null
+  /** Whether a public STUN server was in use for this attempt. */
+  stun: boolean
 }
 
-function newAttempt(): Attempt {
+function newAttempt(stun: boolean): Attempt {
   return {
+    mine: null,
+    theirs: null,
+    stun,
     link: null,
     offer: null,
     session: null,
@@ -126,6 +139,26 @@ function depsFor(): SyncDeps<MergeStats> {
   }
 }
 
+/** The error screen for a connection that did not come up, with what each side found. */
+function connectionError(
+  a: Attempt,
+  kind: "failed" | "timeout"
+): Extract<SyncPhase, { name: "error" }> {
+  const details: string[] = []
+  if (a.mine) details.push(`This device: ${describeAnalysis(a.mine)}.`)
+  if (a.theirs) details.push(`Other device: ${describeAnalysis(a.theirs)}.`)
+  return {
+    name: "error",
+    message: connectFailureMessage({
+      kind,
+      mine: a.mine,
+      theirs: a.theirs,
+      stunOn: a.stun,
+    }),
+    details,
+  }
+}
+
 function message(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
@@ -142,7 +175,8 @@ function message(error: unknown, fallback: string): string {
  * with that code shows a reply, and `accept` on the first takes the reply.
  * `accept` and `join` return an error text (for a bad code) or null.
  */
-export function usePeerSync() {
+export function usePeerSync(options: { stun?: boolean } = {}) {
+  const stun = options.stun === true
   const [phase, setPhase] = React.useState<SyncPhase>({ name: "idle" })
   const attempt = React.useRef<Attempt | null>(null)
 
@@ -217,13 +251,15 @@ export function usePeerSync() {
       },
       onClose(reason) {
         if (a.over) return
-        end({
-          name: "error",
-          message:
-            reason === "failed"
-              ? "Could not connect. The devices must be on the same wifi, and a guest network or a router setting that isolates devices can block this."
-              : "The other device disconnected before the sync finished.",
-        })
+        end(
+          reason === "failed"
+            ? connectionError(a, "failed")
+            : {
+                name: "error",
+                message:
+                  "The other device disconnected before the sync finished.",
+              }
+        )
       },
     }
   }, [])
@@ -231,22 +267,27 @@ export function usePeerSync() {
   /** Device 1: make a code to show. */
   const start = React.useCallback(async () => {
     teardown()
-    const a = newAttempt()
+    const a = newAttempt(stun)
     attempt.current = a
     setPhase({ name: "working" })
     try {
-      const offer = await openOffer(handlersFor(a))
+      const offer = await openOffer(handlersFor(a), { stun })
       if (attempt.current !== a) return offer.link.close()
       a.offer = offer
       a.link = offer.link
-      setPhase({ name: "offer", code: offer.code })
+      a.mine = analyzeSdp(offer.localSdp)
+      setPhase({
+        name: "offer",
+        code: offer.code,
+        warning: codeWarning(a.mine),
+      })
     } catch (error) {
       setPhase({
         name: "error",
         message: message(error, "Could not prepare a connection."),
       })
     }
-  }, [handlersFor, teardown])
+  }, [handlersFor, teardown, stun])
 
   /** Device 1: take the reply shown on device 2. */
   const accept = React.useCallback(
@@ -254,7 +295,8 @@ export function usePeerSync() {
       const a = attempt.current
       if (!a?.offer) return "Start again."
       try {
-        await a.offer.accept(replyCode)
+        const remote = await a.offer.accept(replyCode)
+        a.theirs = analyzeSdp(remote)
       } catch (error) {
         return message(error, "That reply code did not work.")
       }
@@ -264,11 +306,7 @@ export function usePeerSync() {
         a.over = true
         a.release?.()
         a.link?.close()
-        setPhase({
-          name: "error",
-          message:
-            "Timed out before the devices connected. They must be on the same wifi; a guest network or a router setting that isolates devices can block this.",
-        })
+        setPhase(connectionError(a, "timeout"))
       }, CONNECT_TIMEOUT_MS)
       return null
     },
@@ -279,17 +317,23 @@ export function usePeerSync() {
   const join = React.useCallback(
     async (startCode: string): Promise<string | null> => {
       teardown()
-      const a = newAttempt()
+      const a = newAttempt(stun)
       attempt.current = a
       setPhase({ name: "working" })
       try {
-        const answer = await openAnswer(startCode, handlersFor(a))
+        const answer = await openAnswer(startCode, handlersFor(a), { stun })
         if (attempt.current !== a) {
           answer.link.close()
           return null
         }
         a.link = answer.link
-        setPhase({ name: "answer", code: answer.code })
+        a.mine = analyzeSdp(answer.localSdp)
+        a.theirs = analyzeSdp(answer.remoteSdp)
+        setPhase({
+          name: "answer",
+          code: answer.code,
+          warning: codeWarning(a.mine),
+        })
         return null
       } catch (error) {
         attempt.current = null
@@ -297,7 +341,7 @@ export function usePeerSync() {
         return message(error, "That code did not work.")
       }
     },
-    [handlersFor, teardown]
+    [handlersFor, teardown, stun]
   )
 
   const reset = React.useCallback(() => {

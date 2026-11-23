@@ -5,6 +5,8 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   FileUpIcon,
+  FolderIcon,
+  ShareIcon,
   MonitorIcon,
   MoonIcon,
   RefreshCwIcon,
@@ -12,6 +14,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
+import { BackupStatusLine } from "@/components/backup-status"
 import { FsrsOptimizer } from "@/components/fsrs-optimizer"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,9 +23,12 @@ import {
   MAX_RETENTION,
   MIN_RETENTION,
 } from "@/db/scheduler"
+import type { AutoBackup } from "@/hooks/use-auto-backup"
+import type { BackupStatus } from "@/hooks/use-backup-status"
 import { useHistoryLayer } from "@/hooks/use-history-layer"
 import { useSetting } from "@/hooks/use-settings"
 import { useTheme, type Theme } from "@/hooks/use-theme"
+import type { SnapshotMeta } from "@/lib/backup"
 import { DEFAULT_LEECH_THRESHOLD, MAX_LEECH_THRESHOLD } from "@/lib/leech"
 import { version } from "../../package.json"
 
@@ -91,6 +97,132 @@ function DataAction({
   )
 }
 
+/** The copies made before file imports: put one back to undo an import. */
+function ImportCopies({
+  snapshots,
+  busy,
+  onRestore,
+  onRemove,
+}: {
+  snapshots: SnapshotMeta[]
+  busy: boolean
+  onRestore: (meta: SnapshotMeta) => void
+  onRemove: (meta: SnapshotMeta) => void
+}) {
+  if (snapshots.length === 0) return null
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Undo an import
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Before every backup import Glyph keeps a copy of your data here (the
+        last {snapshots.length > 1 ? snapshots.length : "one"}, inside this
+        browser). Putting one back replaces your data with it.
+      </p>
+      <ul className="divide-y overflow-hidden rounded-xl border">
+        {snapshots.map((meta) => (
+          <li
+            key={meta.at}
+            className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm"
+          >
+            <span className="min-w-0">
+              <span className="block">
+                {new Date(meta.at).toLocaleString()}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {meta.reason}: {meta.notes} questions, {meta.reviews} reviews,{" "}
+                {(meta.bytes / 1e6).toFixed(1)} MB
+              </span>
+            </span>
+            <span className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => onRestore(meta)}
+              >
+                Put back
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => onRemove(meta)}
+              >
+                Delete
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function AutoBackupControls({ auto }: { auto: AutoBackup }) {
+  if (!auto.supported) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Saving a backup to a folder by itself needs Chrome or Edge on a
+        computer. On a phone, export a backup now and then; Glyph reminds you.
+      </p>
+    )
+  }
+  if (auto.folder === null) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Automatic backup saves a copy to a folder you pick (a synced one such
+          as Dropbox or OneDrive is a good choice) on the first start each day
+          something changed, and keeps the seven newest.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => void auto.choose()}>
+          <FolderIcon data-icon="inline-start" />
+          Choose a folder
+        </Button>
+        {auto.error && (
+          <p role="alert" className="text-xs text-destructive">
+            {auto.error}
+          </p>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Automatic backup is on: &quot;{auto.folder}&quot;.{" "}
+        {auto.running
+          ? "Saving now..."
+          : auto.last
+            ? `Saved ${auto.last.name}.`
+            : auto.needsPermission
+              ? "Waiting for your OK to write there."
+              : "A copy is saved the first time each day something changed."}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {auto.needsPermission && (
+          <Button size="sm" onClick={() => void auto.allow()}>
+            Allow
+          </Button>
+        )}
+        <Button variant="outline" size="sm" onClick={() => void auto.choose()}>
+          Change folder
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => void auto.turnOff()}>
+          Turn off
+        </Button>
+      </div>
+      {auto.error && (
+        <p role="alert" className="text-xs text-destructive">
+          {auto.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * Full-page settings: theme, data (import / export), statistics (placeholder)
  * and app info. Results of the data actions show in the notice banner that
@@ -103,7 +235,21 @@ export function SettingsPage({
   onExportBackup,
   onImportBackup,
   onSync,
+  status,
+  auto,
+  shareReady,
+  onShare,
+  snapshots,
+  onRestore,
+  onRemoveSnapshot,
 }: {
+  snapshots: SnapshotMeta[]
+  onRestore: (meta: SnapshotMeta) => void
+  onRemoveSnapshot: (meta: SnapshotMeta) => void
+  status: BackupStatus
+  auto: AutoBackup
+  shareReady: boolean
+  onShare: () => void
   busy: boolean
   onBack: () => void
   onSync: () => void
@@ -216,11 +362,7 @@ export function SettingsPage({
               onChange={(e) => {
                 setThresholdDraft(e.target.value)
                 const n = e.target.valueAsNumber
-                if (
-                  Number.isInteger(n) &&
-                  n >= 0 &&
-                  n <= MAX_LEECH_THRESHOLD
-                ) {
+                if (Number.isInteger(n) && n >= 0 && n <= MAX_LEECH_THRESHOLD) {
                   setLeechThreshold(n)
                 }
               }}
@@ -316,6 +458,14 @@ export function SettingsPage({
                 disabled={busy}
                 onClick={onExportBackup}
               />
+              {shareReady && (
+                <DataAction
+                  icon={<ShareIcon aria-hidden />}
+                  title="Share backup file"
+                  description="The backup is ready. Tap to save it with the share sheet."
+                  onClick={onShare}
+                />
+              )}
               <DataAction
                 icon={<FileUpIcon aria-hidden />}
                 title="Restore backup"
@@ -324,6 +474,14 @@ export function SettingsPage({
                 onClick={onImportBackup}
               />
             </div>
+            <BackupStatusLine status={status} />
+            <AutoBackupControls auto={auto} />
+            <ImportCopies
+              snapshots={snapshots}
+              busy={busy}
+              onRestore={onRestore}
+              onRemove={onRemoveSnapshot}
+            />
           </div>
         </div>
       </Section>

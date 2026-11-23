@@ -280,6 +280,23 @@ export async function readBackupSnapshot(): Promise<{
   return { data, images, settings }
 }
 
+/**
+ * How many reviews and question edits (or deletions) were made after `since`
+ * (every one when null): the work a backup made then would not contain. Index
+ * counts only, so it is cheap on a big log.
+ */
+export async function countChangesSince(since: number | null): Promise<number> {
+  if (since === null) {
+    return (await db.revlog.count()) + (await db.notes.count())
+  }
+  const [reviews, edited, deleted] = await Promise.all([
+    db.revlog.where("reviewedAt").above(since).count(),
+    db.notes.where("contentUpdatedAt").above(since).count(),
+    db.notes.where("deletedAt").above(since).count(),
+  ])
+  return reviews + edited + deleted
+}
+
 /** How many reviews the log holds; the automatic refit paces itself by this. */
 export async function countReviews(): Promise<number> {
   return db.revlog.count()

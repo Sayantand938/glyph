@@ -7,8 +7,24 @@ import { decodePairing, encodePairing } from "./pairing"
  * as pairing codes the user moves by hand (copy and paste). No ICE servers
  * are configured, so nothing leaves the local network and the app makes no
  * outside calls; the cost is that it only works when the devices can reach each
- * other (not on a guest network that isolates clients).
+ * other (not on a guest network that isolates clients). A person can turn on a
+ * public STUN server (`stun: true`, off by default and per device): that asks
+ * the server for this device's public address, which breaks the no-outside-calls
+ * rule, and helps when the devices are on different networks.
  */
+
+/** The STUN server used when the person turns it on. */
+export const PUBLIC_STUN_URL = "stun:stun.cloudflare.com:3478"
+
+export interface RtcOptions {
+  stun?: boolean
+}
+
+function configFor(options: RtcOptions): RTCConfiguration {
+  return {
+    iceServers: options.stun ? [{ urls: PUBLIC_STUN_URL }] : [],
+  }
+}
 
 export interface Link {
   send(text: string): void
@@ -25,7 +41,6 @@ export interface LinkHandlers {
   onClose(reason: "closed" | "failed"): void
 }
 
-const CONFIG: RTCConfiguration = { iceServers: [] }
 const GATHER_TIMEOUT_MS = 4000
 const BUFFER_HIGH = 1024 * 1024
 const BUFFER_LOW = 256 * 1024
@@ -120,13 +135,21 @@ export interface Offer {
   link: Link
   /** Pairing code to show on this device. */
   code: string
-  /** Applies the other device's answer code; the link opens a moment later. */
-  accept(answerCode: string): Promise<void>
+  /** This device's session description (what the code carries). */
+  localSdp: string
+  /**
+   * Applies the other device's answer code; the link opens a moment later.
+   * Returns the other device's session description.
+   */
+  accept(answerCode: string): Promise<string>
 }
 
 /** The device that starts: makes the offer. */
-export async function openOffer(handlers: LinkHandlers): Promise<Offer> {
-  const pc = new RTCPeerConnection(CONFIG)
+export async function openOffer(
+  handlers: LinkHandlers,
+  options: RtcOptions = {}
+): Promise<Offer> {
+  const pc = new RTCPeerConnection(configFor(options))
   const { link, attach } = makeLink(pc, handlers)
   try {
     attach(pc.createDataChannel("glyph", { ordered: true }))
@@ -137,6 +160,7 @@ export async function openOffer(handlers: LinkHandlers): Promise<Offer> {
     return {
       link,
       code: await encodePairing("offer", sdp),
+      localSdp: sdp,
       async accept(answerCode) {
         const decoded = await decodePairing(answerCode)
         if (!decoded.ok) throw new Error(decoded.error)
@@ -146,6 +170,7 @@ export async function openOffer(handlers: LinkHandlers): Promise<Offer> {
           )
         }
         await pc.setRemoteDescription({ type: "answer", sdp: decoded.sdp })
+        return decoded.sdp
       },
     }
   } catch (error) {
@@ -158,12 +183,16 @@ export interface Answer {
   link: Link
   /** Pairing code to show on this device. */
   code: string
+  /** This device's session description, and the one it was given. */
+  localSdp: string
+  remoteSdp: string
 }
 
 /** The device that joins: reads the offer and makes the answer. */
 export async function openAnswer(
   offerCode: string,
-  handlers: LinkHandlers
+  handlers: LinkHandlers,
+  options: RtcOptions = {}
 ): Promise<Answer> {
   const decoded = await decodePairing(offerCode)
   if (!decoded.ok) throw new Error(decoded.error)
@@ -172,7 +201,7 @@ export async function openAnswer(
       "That is a reply code. Paste the start code from the other device instead."
     )
   }
-  const pc = new RTCPeerConnection(CONFIG)
+  const pc = new RTCPeerConnection(configFor(options))
   const { link, attach } = makeLink(pc, handlers)
   try {
     pc.addEventListener("datachannel", (event) => attach(event.channel))
@@ -181,7 +210,12 @@ export async function openAnswer(
     await gathered(pc)
     const sdp = pc.localDescription?.sdp
     if (!sdp) throw new Error("Could not prepare a connection.")
-    return { link, code: await encodePairing("answer", sdp) }
+    return {
+      link,
+      code: await encodePairing("answer", sdp),
+      localSdp: sdp,
+      remoteSdp: decoded.sdp,
+    }
   } catch (error) {
     pc.close()
     throw error
