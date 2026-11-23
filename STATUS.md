@@ -354,6 +354,10 @@ The data layer moved from IndexedDB (Dexie) to a SQLite file owned by the Tauri 
 
 First desktop and Android release (Tauri 2, SQLite). Windows: `npm run tauri build` gives the MSI (the NSIS bundle needs a download from GitHub that timed out on this machine). Android: `tauri android init` once (the generated `src-tauri/gen` is git-ignored), then `npx tauri android build --apk --target aarch64` with `JAVA_HOME` (Android Studio's `jbr`), `ANDROID_HOME` and `NDK_HOME` set; the APK comes out unsigned and is signed with `apksigner` using `D:\coding\tools\android-keys\glyph` (key made 2026-11-23, same convention as the other apps there; back it up, a lost key means no updates). Not verified: the app running on a phone (SQLite on Android, the screens, device sync).
 
+### Release v0.5.0 (2026-11-23)
+
+Deck tree, manual fit and backup, undo/redo, nearby-device pairing, and session stats on the leave-session page (`SessionStats` in `end-states.tsx`, shared with the finished screen). Built the same way as v0.4.0: MSI from `npm run tauri build -- --bundles msi`; APK from `npx tauri android build --apk --target aarch64`, then `zipalign -p 4` and `apksigner` with the glyph key. If a gradle run reuses an old unsigned APK, delete `src-tauri/gen/android/app/build/outputs` and rebuild. Files are in `releases/` (git-ignored) and on the GitHub release v0.5.0. Not verified: the app running on a phone.
+
 ### Reliability R1-R2 notes (built 2026-11-23)
 
 R0's three failing tests were written as part of R1 (they live in `src/lib/sync-session.test.ts`, "a sync that must notice what the row counts cannot": laptop to phone to tablet, restored backup then sync, picture that never arrived). The fake devices there already carried change stamps and filtered deltas like `readBackupParts`; R0's other half (get the working tree green and committed) was done afterwards: the earlier FSRS and backup work and R1-R2 went into one commit. Sync (1), (2) and (3) from the findings above are fixed; (4) and (5) are not (R6, R7).
