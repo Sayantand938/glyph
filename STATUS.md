@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current version: 0.1.0** (the first tagged release; the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 368 tests pass; typecheck, lint and build are clean. After v0.1.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"). The Next.js → Vite migration is complete.
+**Current version: 0.2.0** (the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 368 tests pass; typecheck, lint and build are clean. Added in v0.2.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"), and a study options page (see "Study options"). The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -45,7 +45,7 @@ The header's Import JSON / Export Backup / Import Backup buttons and menu (`head
 
 Settings > Scheduling has a Desired retention slider (70-97%, default 85%, was ts-fsrs's 90%) and a reset button. The value is a per-device preference in localStorage (`glyph.retention`, via `hooks/use-retention.ts`), like the theme, so it is not part of backups and does not sync. `db/scheduler.ts` keeps one `fsrs` instance per retention value (`schedulerFor`) and `grade`, `previewIntervals` and `applyReview` take a trailing `retention` argument that defaults to `DEFAULT_RETENTION`; `use-study-run.ts` passes the stored value. It affects only future reviews; existing due dates are not recomputed. The `src/sim/` runs use the 85% default.
 
-### FSRS optimizer and local-day scheduling (after v0.1.0)
+### FSRS optimizer and local-day scheduling (v0.2.0)
 
 Settings > Scheduling > **Personalized parameters** fits the 21 FSRS-6 weights to the user's own review log (`src/lib/fsrs/`, UI in `components/fsrs-optimizer.tsx`). Anki ships an optimizer; `ts-fsrs` does not, so this is our own, in plain TypeScript with no new dependency.
 
@@ -58,7 +58,7 @@ Settings > Scheduling > **Personalized parameters** fits the 21 FSRS-6 weights t
 - **Verified.** On synthetic learners whose memory differs from the defaults the fit lands within about 0.005 log loss of the true-weights oracle and cuts the calibration gap several-fold; on an unpredictable synthetic log it matches the oracle too. In the browser (dev server, synthetic revlog) the panel counts reviews, shows progress, stays responsive, stores the weights and "Reset to defaults" clears them. **Not verified: improvement on real Glyph review history**, and no comparison against Anki's own optimizer on the same data.
 - **Not built:** automatic re-optimization, a per-deck fit, syncing weights in backups, showing the fitted weights, and a cancel for the browser tab being closed mid-fit (it just stops). A very large log (100k+ reviews) will take tens of seconds; the optimizer yields to the page while it works.
 
-### Study options: pick the groups and cap new cards (after v0.1.0)
+### Study options: pick the groups and cap new cards (v0.2.0)
 
 Pressing Study on a Subject, Topic or tag no longer starts the session straight away. It opens `components/study/study-options-page.tsx` (a full page on `PageShell`, like the others): three checkboxes (Due, Learning, New) with live counts, and a "Max new cards" box (empty = no limit). Start shows the size of the session ("Start (54 cards)"), is the autofocused submit button (Enter starts), and is disabled when nothing would be studied. This is Anki's custom study, minus study-ahead.
 
