@@ -34,21 +34,21 @@ vite.config.ts      react + tailwind + VitePWA (manifest lives here)
 src/main.tsx        mounts <ThemeProvider><DbProvider><App/>
 src/App.tsx         app shell
 src/index.css       Tailwind + theme tokens
-src/components/     React components (ui/ = shadcn)
-src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo.ts (writes), queries.ts (reads)
-src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer, queue, backup, session, note-edit
+src/components/     React components (ui/ = shadcn; study/ = study session; import/ = import modal)
+src/db/             Dexie schema + startup (database.ts), types, scheduler.ts, seed.ts, repo/ (writes), queries.ts (reads)
+src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, queue, backup/, session, note-edit
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, PWA icons in public/icons/
 ```
 
-Tests sit next to the code as `*.test.ts`.
+Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` are directories behind an `index.ts` barrel, so import them as `@/lib/backup`, `@/lib/importer` and `@/db/repo`; keep each file focused on one concern.
 
 ## Rules
 
 1. Build in phase order; don't start a phase until the previous checkpoint passes.
 2. No `any`, no `@ts-ignore`.
 3. UI code never imports `ts-fsrs`. Everything FSRS goes through `src/db/scheduler.ts` (which re-exports `Rating`, `State`, `Grade`).
-4. All writes go through `src/db/repo.ts`, each in one Dexie transaction. Components only read (`useLiveQuery`).
+4. All writes go through `src/db/repo/` (import from `@/db/repo`), each in one Dexie transaction. Components only read (`useLiveQuery`).
 5. Pure logic (answer normalization, hashing, shuffling, queue building, merging, import planning) lives in `src/lib/` with unit tests and no DB or React imports.
 6. Never edit Dexie `version(1)` after release; add `db.version(n).upgrade()`.
 7. A note's `id` is frozen at creation. Editing a question never changes it; re-import must never touch a card row.

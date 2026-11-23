@@ -33,6 +33,16 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 - **Phase 7:** `src/components/pwa-toast.tsx` (`useRegisterSW` from `virtual:pwa-register/react`) shows "Ready to work offline." once the precache is installed and "Update available" with Reload / Later when a new service worker is waiting; mounted in `App.tsx`. `registerType` changed from `autoUpdate` to `prompt` (see below), and `vite-plugin-pwa/react` was added to `tsconfig.json` `types`. The dashboard footer now carries the "data lives only in this browser, export backups, add to Home Screen on iOS" hint. The iOS meta tags (`apple-touch-icon`, `apple-mobile-web-app-capable`, title, status bar) were already in `index.html`. Verified in the browser against `npm run preview`: the service worker installs and precaches 18 entries, the "Ready to work offline" toast appears, then with the preview server stopped (a real offline test, not just DevTools throttling) the page reloads from the cache, a card was answered and rated Good (1 revlog row, card state Learning), and after another offline reload the dashboard showed 1 new today and the revlog row was still there. A changed `sw.js` produced the "Update available" toast and Reload activated the new worker. Not done: replacing the placeholder icons (needs real art); not exercised on a real iOS device or as an installed PWA.
 
+### Refactor: smaller files (after Phase 7)
+
+Pure restructuring, no behavior change. The four largest modules became directories; import paths for `@/lib/backup`, `@/lib/importer` and `@/db/repo` are unchanged (barrel `index.ts`). Phase notes below still name the old single files.
+
+- `src/lib/backup/`: `types`, `export`, `read-rows` (row validators), `parse`, `pick` (conflict rules), `merge`, `summary`.
+- `src/lib/importer/`: `types`, `parse` (`parseImportText`, `validateRows`), `plan` (`planImport`, `summarize`, `formatSummary`), `deck-ref`.
+- `src/db/repo/`: `decks`, `notes`, `reviews`, `import-notes` (`commitImport`), `import-backup` (`importBackup`), `clean-name`.
+- `src/components/study/`: `study-session` (shell), `use-study-run` (queue, answers, undo), `use-study-keys`, `session-toolbar`, `question-view`, `end-states`, `exit-dialog`, `types`, `helpers`. Imported as `@/components/study/study-session`.
+- `src/components/import/`: `import-modal` (shell), `import-form`, `file-drop`, `deck-field` (Subject/Topic picker, replaces two near-identical blocks), `import-preview`, `use-import-file`. Imported as `@/components/import/import-modal`.
+
 ### Deviations from the plan
 
 - **Migrated from Next.js to Vite** (after Phase 3, before Phase 4). Reason: a fully client-side, offline PWA gains nothing from SSR, Dexie is browser-only, and `vite-plugin-pwa` (in the original plan) makes Phase 7 trivial. Changes: code moved under `src/` (alias `@/*` → `src/`), `index.html` + `src/main.tsx` replace `app/layout.tsx`, the manifest moved into `vite.config.ts`, `next/font` became `@fontsource-variable/jetbrains-mono` (self-hosted, precached), ESLint switched to `typescript-eslint` + react-hooks + react-refresh, and dev runs on port 5173.
