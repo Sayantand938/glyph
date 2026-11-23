@@ -18,6 +18,7 @@ import {
 } from "ts-fsrs"
 
 import { marksOf, type CardMarks } from "@/lib/card-marks"
+import { toStudyClock } from "@/lib/fsrs/days"
 
 import type { CardRow, Note, RevlogRow } from "./types"
 
@@ -45,18 +46,61 @@ export function parseRetention(stored: unknown): number | null {
     : null
 }
 
-const schedulers = new Map<number, FSRS>()
+/** Fitted FSRS weights (see `src/lib/fsrs`); absent means ts-fsrs's defaults. */
+export type Weights = readonly number[]
 
-function schedulerFor(retention: number): FSRS {
+const schedulers = new Map<string, FSRS>()
+
+function schedulerFor(retention: number, weights?: Weights): FSRS {
   const key = clampRetention(retention)
-  let instance = schedulers.get(key)
+  const id = weights ? `${key}|${weights.join(",")}` : `${key}`
+  let instance = schedulers.get(id)
   if (!instance) {
+    // Weights change rarely (after an optimization); don't let old sets pile up.
+    if (schedulers.size >= 12) schedulers.clear()
     instance = fsrs(
-      generatorParameters({ enable_fuzz: true, request_retention: key })
+      generatorParameters({
+        enable_fuzz: true,
+        request_retention: key,
+        ...(weights ? { w: [...weights] } : {}),
+      })
     )
-    schedulers.set(key, instance)
+    schedulers.set(id, instance)
   }
   return instance
+}
+
+/**
+ * ts-fsrs counts elapsed days as the difference between UTC dates. Glyph counts
+ * local calendar days (see `src/lib/fsrs/days.ts`), so the dates handed to
+ * ts-fsrs are moved to a clock whose UTC date is the local day, and the dates it
+ * returns are moved back. Everything the rest of the app sees is a real
+ * timestamp.
+ */
+function schedulerInput(
+  row: CardRow,
+  now: number
+): {
+  card: Card
+  at: Date
+  shift: number
+} {
+  const card = rowToCard(row)
+  if (card.last_review) {
+    card.last_review = new Date(toStudyClock(card.last_review.getTime()))
+  }
+  const shift = toStudyClock(now) - now
+  return { card, at: new Date(now + shift), shift }
+}
+
+function realCard(card: Card, shift: number): Card {
+  return {
+    ...card,
+    due: new Date(card.due.getTime() - shift),
+    last_review: card.last_review
+      ? new Date(card.last_review.getTime() - shift)
+      : undefined,
+  }
 }
 
 const MINUTE = 60_000
@@ -157,11 +201,14 @@ export interface IntervalPreview {
 export function previewIntervals(
   row: CardRow,
   now: number,
-  retention = DEFAULT_RETENTION
+  retention = DEFAULT_RETENTION,
+  weights?: Weights
 ): IntervalPreview {
-  const preview = schedulerFor(retention).repeat(rowToCard(row), new Date(now))
+  const { card, at } = schedulerInput(row, now)
+  const preview = schedulerFor(retention, weights).repeat(card, at)
+  // Both ends are on the shifted clock, so the difference is the real interval.
   const label = (grade: Grade) =>
-    formatInterval(preview[grade].card.due.getTime() - now)
+    formatInterval(preview[grade].card.due.getTime() - at.getTime())
   return {
     again: label(Rating.Again),
     good: label(Rating.Good),
@@ -173,15 +220,13 @@ export function grade(
   rating: Grade,
   now: number,
   durationMs = 0,
-  retention = DEFAULT_RETENTION
+  retention = DEFAULT_RETENTION,
+  weights?: Weights
 ): { row: CardRow; log: RevlogRow } {
-  const { card } = schedulerFor(retention).next(
-    rowToCard(row),
-    new Date(now),
-    rating
-  )
+  const { card: input, at, shift } = schedulerInput(row, now)
+  const { card } = schedulerFor(retention, weights).next(input, at, rating)
   return {
-    row: cardToRow(card, row),
+    row: cardToRow(realCard(card, shift), row),
     log: {
       id: crypto.randomUUID(),
       cardId: row.cardId,

@@ -11,6 +11,7 @@ import {
   undoReview,
 } from "@/db/repo"
 import { Rating, previewIntervals, type Grade } from "@/db/scheduler"
+import { useFsrsWeights } from "@/hooks/use-fsrs-weights"
 import { useRetention } from "@/hooks/use-retention"
 import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
@@ -23,6 +24,7 @@ import {
   requeueGap,
   summarizeSession,
 } from "@/lib/session"
+import type { StudyOptions } from "@/lib/study-options"
 
 import type { StudyScope } from "../deck-tree"
 import { currentTime, dropFocus, errorText, parseBool } from "./helpers"
@@ -33,7 +35,7 @@ import type { MarkUndo, Run, UndoEntry } from "./types"
  * current card live, saves answers, and supports undo. Rendering and keyboard
  * handling live elsewhere.
  */
-export function useStudyRun(scope: StudyScope) {
+export function useStudyRun(scope: StudyScope, options: StudyOptions) {
   const [seed] = React.useState(() => crypto.randomUUID())
   const [run, setRun] = React.useState<Run | null>(null)
   const [loadError, setLoadError] = React.useState<string | null>(null)
@@ -46,6 +48,7 @@ export function useStudyRun(scope: StudyScope) {
     parseBool
   )
   const [retention] = useRetention()
+  const [weights] = useFsrsWeights()
   const busy = React.useRef(false)
   const shownAt = React.useRef(0)
 
@@ -61,6 +64,8 @@ export function useStudyRun(scope: StudyScope) {
           seed,
           // A Subject or a tag mixes cards from several topics.
           mixed: scope.kind !== "topic",
+          include: options,
+          newLimit: options.newLimit,
         })
         shownAt.current = currentTime()
         setRun({
@@ -77,7 +82,7 @@ export function useStudyRun(scope: StudyScope) {
     return () => {
       cancelled = true
     }
-  }, [scope, seed])
+  }, [scope, options, seed])
 
   const cardId =
     run && run.index < run.queue.length ? run.queue[run.index] : null
@@ -111,9 +116,14 @@ export function useStudyRun(scope: StudyScope) {
   const intervals = React.useMemo(
     () =>
       data && rightPickedAt !== null
-        ? previewIntervals(data.card, rightPickedAt, retention)
+        ? previewIntervals(
+            data.card,
+            rightPickedAt,
+            retention,
+            weights ?? undefined
+          )
         : null,
-    [data, rightPickedAt, retention]
+    [data, rightPickedAt, retention, weights]
   )
 
   // Deleting the last cards can leave an empty queue after some answers; that
@@ -161,7 +171,8 @@ export function useStudyRun(scope: StudyScope) {
         view.card,
         Rating.Again,
         durationMs,
-        retention
+        retention,
+        weights ?? undefined
       )
       const gap = requeueGap(seed, view.card.cardId, current.index)
       const entry: UndoEntry = {
@@ -203,7 +214,8 @@ export function useStudyRun(scope: StudyScope) {
         view.card,
         rating,
         durationMs,
-        retention
+        retention,
+        weights ?? undefined
       )
       const failed = rating === Rating.Again
       const gap = requeueGap(seed, view.card.cardId, current.index)

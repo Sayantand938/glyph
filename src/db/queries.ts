@@ -1,6 +1,7 @@
 /** Read-only queries. Writes live in repo.ts. Call these from `useLiveQuery`. */
 import type { BackupData } from "@/lib/backup"
 import { makeBrowseRow, type BrowseRow } from "@/lib/browse"
+import type { ReviewRecord } from "@/lib/fsrs"
 import { bytesToBase64, imageIdsInNotes } from "@/lib/image"
 import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
 
@@ -257,6 +258,20 @@ export async function readBackupSnapshot(): Promise<{
     })
   }
   return { data, images }
+}
+
+/**
+ * The whole review log, reduced to what the FSRS optimizer reads. Reviews of
+ * deleted questions are kept: they are still real evidence of how memory works.
+ */
+export async function loadReviewRecords(): Promise<ReviewRecord[]> {
+  const rows = await db.revlog.toArray()
+  return rows.map(({ cardId, reviewedAt, rating, state }) => ({
+    cardId,
+    reviewedAt,
+    rating,
+    state,
+  }))
 }
 
 /** Every tag used by any note (deleted ones included), sorted, for suggestions. */

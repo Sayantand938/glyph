@@ -93,6 +93,26 @@ export interface BuildQueueOptions {
    * true (Subject): learning first, then reviews and new cards mixed together.
    */
   mixed?: boolean
+  /** Which kinds of card to include; all of them when omitted. */
+  include?: Partial<QueueGroups>
+  /**
+   * At most this many new cards, the oldest first (null or omitted = all of
+   * them). Cards of the other groups are never limited.
+   */
+  newLimit?: number | null
+}
+
+/** The three kinds of card a session can draw from. */
+export interface QueueGroups {
+  due: boolean
+  learning: boolean
+  new: boolean
+}
+
+/** How many new cards `newLimit` lets through, out of `available`. */
+export function limitNew(available: number, newLimit?: number | null): number {
+  if (newLimit === null || newLimit === undefined) return available
+  return Math.max(0, Math.min(available, Math.floor(newLimit)))
 }
 
 function byDue(a: QueueCard, b: QueueCard): number {
@@ -104,15 +124,23 @@ function byDue(a: QueueCard, b: QueueCard): number {
 /**
  * Builds the session as a list of cardIds, once at session start.
  * Learning/Relearning cards due now come first (most overdue first), then Review
- * cards due today, then all New cards (there is no daily new-card limit).
- * Suspended and buried cards are skipped.
+ * cards due today, then New cards (all of them unless `newLimit` is set).
+ * `include` leaves a whole group out, like Anki's custom study. Suspended and
+ * buried cards are skipped.
  */
 export function buildQueue({
   cards,
   now,
   seed,
   mixed = false,
+  include,
+  newLimit,
 }: BuildQueueOptions): string[] {
+  const wanted: QueueGroups = {
+    due: include?.due ?? true,
+    learning: include?.learning ?? true,
+    new: include?.new ?? true,
+  }
   const learning: QueueCard[] = []
   const review: QueueCard[] = []
   const fresh: QueueCard[] = []
@@ -120,13 +148,18 @@ export function buildQueue({
 
   for (const card of cards) {
     if (isHidden(card, now)) continue
-    if (card.state === CARD_NEW) fresh.push(card)
-    else if (isLearning(card.state) && card.due <= now) learning.push(card)
-    else if (card.state === CARD_REVIEW && card.due <= endOfDay)
-      review.push(card)
+    if (card.state === CARD_NEW) {
+      if (wanted.new) fresh.push(card)
+    } else if (isLearning(card.state) && card.due <= now) {
+      if (wanted.learning) learning.push(card)
+    } else if (card.state === CARD_REVIEW && card.due <= endOfDay) {
+      if (wanted.due) review.push(card)
+    }
   }
 
-  const newCards = fresh.sort(byDue)
+  // Oldest first, so a limit takes the cards that have waited longest and the
+  // rest follow on later days.
+  const newCards = fresh.sort(byDue).slice(0, limitNew(fresh.length, newLimit))
   const ids = (list: readonly QueueCard[]) => list.map((c) => c.cardId)
 
   const first = ids(learning.sort(byDue))

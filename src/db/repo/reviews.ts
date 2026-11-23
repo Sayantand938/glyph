@@ -1,7 +1,12 @@
 import { marksOf } from "@/lib/card-marks"
 
 import { db } from "../database"
-import { DEFAULT_RETENTION, grade, type Grade } from "../scheduler"
+import {
+  DEFAULT_RETENTION,
+  grade,
+  type Grade,
+  type Weights,
+} from "../scheduler"
 import type { CardRow, RevlogRow } from "../types"
 
 /**
@@ -14,9 +19,10 @@ export async function applyReview(
   rating: Grade,
   durationMs: number,
   retention = DEFAULT_RETENTION,
+  weights?: Weights,
   now = Date.now()
 ): Promise<{ row: CardRow; log: RevlogRow }> {
-  const result = grade(cardRow, rating, now, durationMs, retention)
+  const result = grade(cardRow, rating, now, durationMs, retention, weights)
   return db.transaction("rw", [db.cards, db.revlog], async () => {
     const stored = await db.cards.get(cardRow.cardId)
     const row = stored ? { ...result.row, ...marksOf(stored) } : result.row
