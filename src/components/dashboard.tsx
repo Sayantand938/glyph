@@ -19,10 +19,12 @@ function parseIds(stored: unknown): string[] | null {
 
 export function Dashboard({
   onStudy,
+  onBrowse,
   onImportJson,
   onImportBackup,
 }: {
   onStudy: (scope: StudyScope) => void
+  onBrowse: (scope: StudyScope) => void
   onImportJson: () => void
   onImportBackup: () => void
 }) {
@@ -92,6 +94,7 @@ export function Dashboard({
           )
         }
         onStudy={onStudy}
+        onBrowse={onBrowse}
         onRename={setRenaming}
         onDelete={setDeleting}
       />

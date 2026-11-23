@@ -9,6 +9,7 @@ import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
 import { buildQueue } from "@/lib/queue"
 import {
+  dropCardFrom,
   optionOrder,
   requeueAgain,
   requeueGap,
@@ -98,8 +99,12 @@ export function useStudyRun(scope: StudyScope) {
     [data, rightPickedAt, retention]
   )
 
-  const finished = run !== null && run.queue.length > 0 && cardId === null
-  const empty = run !== null && run.queue.length === 0
+  // Deleting the last cards can leave an empty queue after some answers; that
+  // is a finished session, not "nothing to study".
+  const answered = (run?.history.length ?? 0) > 0
+  const finished =
+    run !== null && cardId === null && (run.queue.length > 0 || answered)
+  const empty = run !== null && run.queue.length === 0 && !answered
   const lastEntry = run?.history.at(-1)
   const canUndo = !!lastEntry && lastEntry.undoable
   const summary = summarizeSession(run?.history ?? [])
@@ -261,6 +266,31 @@ export function useStudyRun(scope: StudyScope) {
     )
   }
 
+  /**
+   * Takes a question that was just deleted out of the run: the current card and
+   * its re-queued copies leave the queue (the next card slides into place), and
+   * its answers leave the undo history and summary. The review rows it already
+   * wrote stay in the database.
+   */
+  function dropDeleted(noteId: string) {
+    shownAt.current = currentTime()
+    setMessage(null)
+    setRun(
+      (r) =>
+        r && {
+          queue: dropCardFrom(r.queue, r.index, noteId),
+          index: r.index,
+          phase: { kind: "question" },
+          history: r.history
+            .filter((h) => h.cardId !== noteId)
+            .map((h) => ({
+              ...h,
+              queue: dropCardFrom(h.queue, h.index, noteId),
+            })),
+        }
+    )
+  }
+
   return {
     run,
     loadError,
@@ -281,5 +311,6 @@ export function useStudyRun(scope: StudyScope) {
     skipGone,
     undo,
     disableUndoFor,
+    dropDeleted,
   }
 }

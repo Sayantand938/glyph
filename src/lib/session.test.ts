@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   REQUEUE_MAX_GAP,
   REQUEUE_MIN_GAP,
+  dropCardFrom,
   formatDuration,
   optionOrder,
   requeueAgain,
@@ -113,6 +114,27 @@ describe("requeueAgain", () => {
     requeueAgain(queue, 0, 3)
     expect(queue).toEqual(copy)
     expect(requeueAgain(queue, 99, 3)).toEqual(queue)
+  })
+})
+
+describe("dropCardFrom", () => {
+  it("removes the current card and its re-queued copies", () => {
+    expect(dropCardFrom(["a", "b", "c", "b", "d"], 1, "b")).toEqual([
+      "a",
+      "c",
+      "d",
+    ])
+  })
+
+  it("keeps copies before the current position", () => {
+    expect(dropCardFrom(["b", "a", "b", "c"], 2, "b")).toEqual(["b", "a", "c"])
+  })
+
+  it("leaves other cards alone and does not modify the input", () => {
+    const queue = ["a", "b", "c"]
+    expect(dropCardFrom(queue, 1, "x")).toEqual(["a", "b", "c"])
+    dropCardFrom(queue, 0, "a")
+    expect(queue).toEqual(["a", "b", "c"])
   })
 })
 

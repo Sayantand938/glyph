@@ -53,6 +53,19 @@ export function requeueAgain(
   return [...queue.slice(0, at), cardId, ...queue.slice(at)]
 }
 
+/**
+ * The queue without every copy of `cardId` at or after `index` (the current
+ * card and any re-queued copies). Earlier positions are kept, so `index` still
+ * points at the card that follows. The input is not modified.
+ */
+export function dropCardFrom(
+  queue: readonly string[],
+  index: number,
+  cardId: string
+): string[] {
+  return queue.filter((id, i) => i < index || id !== cardId)
+}
+
 /** One answered card view, as far as the summary cares. */
 export interface SessionRecord {
   cardId: string
