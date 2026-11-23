@@ -10,11 +10,15 @@ import {
   addCounts,
   buildQueue,
   countCards,
+  endOfLocalDay,
   totalCount,
   type QueueCard,
 } from "./queue"
 
-const NOW = 1_000_000
+// Local noon, so "later today" and "tomorrow" are unambiguous in any timezone.
+const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime()
+const HOUR = 3_600_000
+const DAY = 24 * HOUR
 
 function card(
   cardId: string,
@@ -34,6 +38,18 @@ describe("state constants", () => {
   })
 })
 
+describe("endOfLocalDay", () => {
+  it("is the last millisecond of the local day", () => {
+    expect(endOfLocalDay(NOW)).toBe(
+      new Date(2026, 5, 15, 23, 59, 59, 999).getTime()
+    )
+    expect(endOfLocalDay(endOfLocalDay(NOW))).toBe(endOfLocalDay(NOW))
+    expect(endOfLocalDay(endOfLocalDay(NOW) + 1)).toBe(
+      new Date(2026, 5, 16, 23, 59, 59, 999).getTime()
+    )
+  })
+})
+
 describe("countCards", () => {
   it("counts new, due learning/relearning and due review", () => {
     const cards = [
@@ -44,8 +60,21 @@ describe("countCards", () => {
       card("e", CARD_LEARNING, NOW + 1),
       card("f", CARD_REVIEW, NOW - 10),
       card("g", CARD_REVIEW, NOW + 10),
+      card("h", CARD_REVIEW, NOW + DAY),
     ]
-    expect(countCards(cards, NOW)).toEqual({ new: 2, learning: 2, due: 1 })
+    expect(countCards(cards, NOW)).toEqual({ new: 2, learning: 2, due: 2 })
+  })
+
+  it("counts a Review card due later today, but not one due tomorrow", () => {
+    const today = card("t", CARD_REVIEW, NOW + 5 * HOUR)
+    const tomorrow = card("m", CARD_REVIEW, endOfLocalDay(NOW) + 1)
+    expect(countCards([today], NOW).due).toBe(1)
+    expect(countCards([tomorrow], NOW).due).toBe(0)
+  })
+
+  it("keeps Learning cards on the exact time", () => {
+    const later = card("l", CARD_LEARNING, NOW + 5 * HOUR)
+    expect(countCards([later], NOW).learning).toBe(0)
   })
 
   it("is zero for no cards", () => {
@@ -71,7 +100,8 @@ describe("buildQueue", () => {
     card("new3", CARD_NEW, 30),
     card("rev1", CARD_REVIEW, NOW - 100),
     card("rev2", CARD_REVIEW, NOW - 50),
-    card("rev-future", CARD_REVIEW, NOW + 100),
+    card("rev-later-today", CARD_REVIEW, NOW + 100),
+    card("rev-future", CARD_REVIEW, NOW + DAY),
     card("lrn1", CARD_LEARNING, NOW - 20),
     card("lrn2", CARD_RELEARNING, NOW - 80),
     card("lrn-future", CARD_LEARNING, NOW + 1),
@@ -80,8 +110,13 @@ describe("buildQueue", () => {
   it("orders learning, then review, then new; skips cards not due", () => {
     const queue = buildQueue({ cards, now: NOW, seed: "s" })
     expect(queue.slice(0, 2)).toEqual(["lrn2", "lrn1"])
-    expect(queue.slice(2, 4).sort()).toEqual(["rev1", "rev2"])
-    expect(queue.slice(4).sort()).toEqual(["new1", "new2", "new3"])
+    // Review cards due any time today, not only those already past due.
+    expect(queue.slice(2, 5).sort()).toEqual([
+      "rev-later-today",
+      "rev1",
+      "rev2",
+    ])
+    expect(queue.slice(5).sort()).toEqual(["new1", "new2", "new3"])
     expect(queue).not.toContain("rev-future")
     expect(queue).not.toContain("lrn-future")
   })

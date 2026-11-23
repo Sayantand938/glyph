@@ -41,6 +41,12 @@ The header's Import JSON / Export Backup / Import Backup buttons and menu (`head
 
 Settings > Scheduling has a Desired retention slider (70-97%, default 85%, was ts-fsrs's 90%) and a reset button. The value is a per-device preference in localStorage (`glyph.retention`, via `hooks/use-retention.ts`), like the theme, so it is not part of backups and does not sync. `db/scheduler.ts` keeps one `fsrs` instance per retention value (`schedulerFor`) and `grade`, `previewIntervals` and `applyReview` take a trailing `retention` argument that defaults to `DEFAULT_RETENTION`; `use-study-run.ts` passes the stored value. It affects only future reviews; existing due dates are not recomputed. The `src/sim/` runs use the 85% default.
 
+### Scheduling check and due rule (after Phase 7)
+
+`src/sim/` (`simulate.ts`, `year.test.ts`) runs the real `grade`, `buildQueue` and re-queue code against a simulated learner (exponential forgetting, a different model from FSRS) for a year on `sample-data/capitals-and-currencies.json` (30 questions), plus 300-card, vacation, weak/strong-learner and lazy-rating scenarios. It checks scheduler invariants every review and sweeps 30 seeds. Set `SIM_REPORT=<file>` to write the full report. Result: no violations, retention 86-91% against the 90% target, about 18 answers per card per year.
+
+It found that `due <= now` made every Review card about 0.6 days late for someone who studies at a similar time each day. `countCards` and `buildQueue` now treat a Review card as due when it is due any time before the end of the local day (`endOfLocalDay` in `lib/queue.ts`); Learning/Relearning keep the exact-time check. Effect over 30 seeds (average learner): retention 87.3% -> 89.0%, lapses per card 1.73 -> 1.46, mean lateness 0.59 -> 0 days; weak learner 82.1% -> 86.3%. Known and left alone: a new card needs two sessions to reach Review (the queue is built once per session), and rating a lucky guess Good costs about 6 points of retention.
+
 ### LaTeX in questions (after Phase 7)
 
 Question text, option text and the explanation (`extra`) now render LaTeX with KaTeX. Four delimiter forms are always accepted: `$...$` and `$$...$$`, and `\(...\)` and `\[...\]`. `$...$` is the default, i.e. the form to use in docs and sample data (`sample-data/math-sample.json` exercises all four); there is no setting to turn any of them off.
@@ -483,3 +489,5 @@ Cloud sync, accounts, images/rich text in questions, per-deck FSRS parameter tun
 ## 12. Nice-to-Haves (only after all checkpoints pass)
 
 Stats screen (reviews per day, retention), per-deck daily limits, search/browse notes, CSV import, haptic feedback on mobile, FSRS parameter optimization from `revlog`.
+
+**Planned, not started:** a naming cleanup (Note -> Question, CardRow -> Progress, Revlog -> Review). See [RENAME_PLAN.md](RENAME_PLAN.md).
