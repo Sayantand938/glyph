@@ -1,6 +1,6 @@
 # Glyph
 
-Offline-first, Anki-style MCQ spaced-repetition desktop app. Tauri 2 + Vite + React + TypeScript, SQLite, FSRS via `ts-fsrs`.
+An opinionated learning app powered by Free Spaced Repetition Scheduling algorithm (FSRS). Works offline.
 
 ```bash
 npm install
