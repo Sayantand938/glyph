@@ -438,14 +438,26 @@ It opens the app's SQLite file through `node:sqlite` and calls the real repo,
 scheduler and importer, so writes are identical to the UI. `mcp/smoke.ts`
 passes the full loop; `opencode.json` registers it for OpenCode.
 
-**UI review (frontend-design).** The app's identity holds up: one JetBrains Mono
-family, a black/white token set, the `glyph_` wordmark, tree connectors that
-carry hierarchy and row-level due/new counts. Fixes made: the blinking cursor
-and the hover nudge now respect `prefers-reduced-motion`, and question and
-explanation text are capped at 70ch while the option buttons stay full width
-(the old 768px mono column ran to ~90 characters). Remaining deliberate choices:
-all-mono type (identity, not a default) and colour used only for the answer
-states, always with an icon and screen-reader text.
+**UI review (frontend-design), on a running app.** Tauri MCP drove the real
+dev window end to end: dashboard, deck screen, a four-answer session (right,
+wrong, undo, next card, completion), Browse and Settings, in dark and light.
+The identity holds up: one JetBrains Mono family, a black/white token set, the
+`glyph_` wordmark, tree connectors that carry hierarchy, and due/new counts in
+the rows. Fixes made:
+
+- the blinking cursor and the hover nudge respect `prefers-reduced-motion`;
+- question/explanation and settings text are capped at 70ch (the 768px mono
+  column ran to ~90 characters);
+- the session summary opened scrolled ~290px past "Session complete" because
+  the bottom button had `autoFocus`; focus now goes to the heading with no
+  scroll;
+- Settings said data lives "in this browser"; the desktop app now says "on this
+  device".
+
+Deliberate choices kept: all-mono type (identity, not a default) and colour
+only for answer states, always with an icon and screen-reader text. Not
+measured: a phone-width viewport (the tiling compositor refused the resize),
+native file dialogs, and device sync.
 
 **Verification.** `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build` and `npm run mcp:smoke` all pass; see the commit message for the

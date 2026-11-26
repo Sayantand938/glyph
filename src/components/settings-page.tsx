@@ -50,7 +50,7 @@ function Section({
       <div className="space-y-1">
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
         {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
+          <p className="max-w-[70ch] text-xs text-muted-foreground">{description}</p>
         )}
       </div>
       {children}
@@ -115,8 +115,8 @@ function ImportCopies({
       </p>
       <p className="text-xs text-muted-foreground">
         Before every backup import Glyph keeps a copy of your data here (the
-        last {snapshots.length > 1 ? snapshots.length : "one"}, inside this
-        browser). Putting one back replaces your data with it.
+        last {snapshots.length > 1 ? snapshots.length : "one"}, on this device).
+        Putting one back replaces your data with it.
       </p>
       <ul className="divide-y overflow-hidden rounded-xl border">
         {snapshots.map((meta) => (
@@ -350,7 +350,7 @@ export function SettingsPage({
 
       <Section
         title="Data"
-        description="Your data lives only in this browser. Move it between devices with a backup file."
+        description="Your data lives only on this device. Move it between devices with a backup file."
       >
         <div className="space-y-4">
           <div className="space-y-2">

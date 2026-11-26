@@ -224,13 +224,25 @@ export function FinishedState({
   scopeName: string
   onExit: () => void
 }) {
+  const heading = React.useRef<HTMLHeadingElement>(null)
+  // The last answer's button still has focus, and auto-focusing the button at
+  // the bottom used to open the summary scrolled past its heading.
+  React.useEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+    window.scrollTo(0, 0)
+  }, [])
+
   return (
     <div className="flex flex-1 flex-col gap-6 py-2">
       <div className="flex flex-col items-center gap-1 text-center">
         <span className="mb-2 flex size-10 items-center justify-center rounded-full bg-foreground text-background">
           <CheckIcon className="size-5" aria-hidden />
         </span>
-        <h2 className="text-xl font-semibold tracking-tight">
+        <h2
+          ref={heading}
+          tabIndex={-1}
+          className="text-xl font-semibold tracking-tight outline-none"
+        >
           Session complete
         </h2>
         <p className="text-sm text-muted-foreground">{scopeName}</p>
@@ -241,7 +253,6 @@ export function FinishedState({
       <Button
         className="mt-auto w-full sm:w-auto sm:self-center sm:px-10"
         onClick={onExit}
-        autoFocus
       >
         Back to decks
       </Button>
