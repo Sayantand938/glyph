@@ -48,7 +48,7 @@ export default function App() {
     >
       <header className="flex items-center justify-between gap-3 border-b py-4">
         <h1 className="text-base font-semibold tracking-tight">
-          glyph<span className="animate-pulse">_</span>
+          glyph<span className="animate-pulse motion-reduce:animate-none">_</span>
         </h1>
         {!importOpen &&
           !backup.review &&

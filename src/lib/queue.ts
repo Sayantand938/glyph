@@ -133,6 +133,59 @@ function byStability(a: QueueCard, b: QueueCard): number {
 }
 
 /**
+ * The `limit` oldest cards, in due order. A bounded max-heap instead of a full
+ * sort: a fresh 150k-card deck with a 200-new-cards-a-day limit takes
+ * O(n log limit) instead of O(n log n), and the result is identical to
+ * `[...cards].sort(byDue).slice(0, limit)`.
+ */
+function takeOldest(
+  cards: readonly QueueCard[],
+  limit: number
+): QueueCard[] {
+  if (limit >= cards.length) return [...cards].sort(byDue)
+  if (limit <= 0) return []
+  const heap: QueueCard[] = []
+
+  const siftUp = (start: number) => {
+    let i = start
+    while (i > 0) {
+      const parent = (i - 1) >> 1
+      if (byDue(heap[i], heap[parent]) <= 0) break
+      ;[heap[i], heap[parent]] = [heap[parent], heap[i]]
+      i = parent
+    }
+  }
+  const siftDown = (start: number) => {
+    let i = start
+    for (;;) {
+      const left = 2 * i + 1
+      const right = left + 1
+      let largest = i
+      if (left < heap.length && byDue(heap[left], heap[largest]) > 0) {
+        largest = left
+      }
+      if (right < heap.length && byDue(heap[right], heap[largest]) > 0) {
+        largest = right
+      }
+      if (largest === i) break
+      ;[heap[i], heap[largest]] = [heap[largest], heap[i]]
+      i = largest
+    }
+  }
+
+  for (const card of cards) {
+    if (heap.length < limit) {
+      heap.push(card)
+      siftUp(heap.length - 1)
+    } else if (byDue(card, heap[0]) < 0) {
+      heap[0] = card
+      siftDown(0)
+    }
+  }
+  return heap.sort(byDue)
+}
+
+/**
  * Spreads `extra` through `base` at seeded random positions, keeping the
  * relative order of both lists.
  */
@@ -159,6 +212,29 @@ function interleave(
  * keep their stability order. `include` leaves a whole group out, like Anki's
  * custom study. Suspended and buried cards are skipped.
  */
+/** The three id lists a queue is assembled from, each already in session order. */
+export interface QueueIds {
+  /** Learning/Relearning due now, most overdue first. */
+  learning: readonly string[]
+  /** Review cards due today, least stable first. */
+  review: readonly string[]
+  /** New cards, oldest due first and already cut to `newLimit`. */
+  fresh: readonly string[]
+}
+
+/**
+ * Turns ordered id lists into the session's queue: learning first, then reviews
+ * (stability order), then new cards (shuffled), or new cards spread through the
+ * reviews in a mixed session. Pure, so the DB layer can let SQL do the filtering
+ * and sorting on a huge deck while the order still comes from one place.
+ */
+export function assembleQueue(ids: QueueIds, seed: string, mixed = false): string[] {
+  const reviews = [...ids.review]
+  const news = seededShuffle([...ids.fresh], `${seed}:new`)
+  if (mixed) return [...ids.learning, ...interleave(reviews, news, seed)]
+  return [...ids.learning, ...reviews, ...news]
+}
+
 export function buildQueue({
   cards,
   now,
@@ -190,12 +266,16 @@ export function buildQueue({
 
   // Oldest first, so a limit takes the cards that have waited longest and the
   // rest follow on later days.
-  const newCards = fresh.sort(byDue).slice(0, limitNew(fresh.length, newLimit))
+  const newCards = takeOldest(fresh, limitNew(fresh.length, newLimit))
   const ids = (list: readonly QueueCard[]) => list.map((c) => c.cardId)
 
-  const first = ids(learning.sort(byDue))
-  const reviews = ids(review.sort(byStability))
-  const news = seededShuffle(ids(newCards), `${seed}:new`)
-  if (mixed) return [...first, ...interleave(reviews, news, seed)]
-  return [...first, ...reviews, ...news]
+  return assembleQueue(
+    {
+      learning: ids(learning.sort(byDue)),
+      review: ids(review.sort(byStability)),
+      fresh: ids(newCards),
+    },
+    seed,
+    mixed
+  )
 }

@@ -10,7 +10,7 @@ This file was `PLAN.md`; it is both the plan and the running status. Update the 
 
 ## Current Status
 
-**Current version: 0.3.0** (the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 425 tests pass; typecheck, lint and build are clean. Added in v0.2.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"), and a study options page (see "Study options"). Added in v0.3.0: due reviews are asked least stable first (see "Queue order"). After v0.3.0: complete review-log rows and a per-question Review history page in Browse (see "Review log and per-question history"); this also reset all card progress to New. After that: device-to-device sync (below), then settings that sync plus automatic FSRS re-fit and leeches (see "Synced settings and automatic re-fit" and "Leeches"), then the reliability work on backup, import and sync (R0-R6 are built, see "Reliability plan"; R7 is not). The Next.js → Vite migration is complete.
+**Current version: 0.5.0** (the version shows in the app footer and comes from `package.json`). **Current phase: all seven phases are built.** Phase 7 (PWA offline verification) is done except replacing the placeholder icons. Work added after Phase 7 is described in the sections below (configurable retention, LaTeX, Markdown, images, browse and delete, tags, full pages, **suspend / bury / flag with study hotkeys**, and a redesign of the settings data actions and the end-of-session summary). 593 tests pass (9 skipped opt-in simulations); typecheck, lint, build and the MCP smoke test are clean. See "Heavy workload, read-path performance, MCP and the Linux build (2026-11-27)". Added in v0.2.0: an FSRS parameter optimizer and local-day scheduling (see "FSRS optimizer and local-day scheduling"), and a study options page (see "Study options"). Added in v0.3.0: due reviews are asked least stable first (see "Queue order"). After v0.3.0: complete review-log rows and a per-question Review history page in Browse (see "Review log and per-question history"); this also reset all card progress to New. After that: device-to-device sync (below), then settings that sync plus automatic FSRS re-fit and leeches (see "Synced settings and automatic re-fit" and "Leeches"), then the reliability work on backup, import and sync (R0-R6 are built, see "Reliability plan"; R7 is not). The Next.js → Vite migration is complete.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -382,6 +382,74 @@ Fixes findings Backup (1)-(3), Import (4)-(5) and Sync (4). 540 tests pass (9 sk
 - **Connection diagnostics (R6).** `lib/sync/diagnose.ts` (pure, 33 tests): reads `a=candidate:` lines, classifies addresses (`.local` names, private, CGNAT, link-local, loopback, IPv6, public), `codeWarning` (shown under a code that cannot work: no address, or only unreachable ones), `comparePeers` (same /24 likely; different private networks unlikely, with both prefixes; hidden names unknown) and `connectFailureMessage`, which puts the specific cause before the usual advice and lists what each device found. `rtc.ts` returns both session descriptions; `use-peer-sync.ts` keeps the analyses per attempt. An off-by-default, per-device checkbox on the sync page ("Use a public STUN server", localStorage `glyph.syncStun`, `PUBLIC_STUN_URL` = Cloudflare) adds one STUN server to the connection; it is the only outside call in the app and the page says what it tells that server (this device's public address, never data). A real Chrome offer code carries one candidate, a `.local` name, so "hidden address" is the common case.
 - **Verified in the browser (dev server).** Export and import through the UI on a small database (notice, preview page, import, snapshot listed, put back with the digest check, bad-row file, flipped-byte file, cut file, old single-JSON file, dashboard reminder after a stale last-backup time); `writeAutoBackup` against an origin-private folder holding 8 old backups and two foreign files (7 kept, foreign files untouched); the failure message after a forged answer code (it timed out into "Could not connect" with the per-device lines); the 50k-question database as above.
 - **Not covered.** `showDirectoryPicker` itself and the permission prompt (it needs a native dialog), the iOS share sheet and Home Screen behaviour, Safari's missing `createWritable` (so no snapshots there), a real two-network matrix for R6, and an import of the 50k file through the UI (the same functions were driven from the console). `db/snapshots.ts`, `backup-folder.ts` and `import-file.ts` have no Vitest test (no `fake-indexeddb`).
+
+### Heavy workload, read-path performance, MCP and the Linux build (2026-11-27)
+
+**Linux build.** `npm run tauri build -- --bundles deb` finished cleanly:
+`src-tauri/target/release/app` and
+`src-tauri/target/release/bundle/deb/Glyph_0.5.0_amd64.deb` (5.57 MiB). The
+release binary ran for 12 s without an error, created
+`~/.local/share/app.glyph.desktop/glyph.db`, migrated it to `user_version = 1`
+and seeded the two sample decks and three cards, so the Linux shell, SQLite
+bridge and startup path work.
+
+**Read-path optimisation.** The dashboard and the study-options page used to
+read every card row of the deck and count in JavaScript. A 150,000-card probe
+(`npx tsx mcp/bench.ts 150000`) measured:
+
+| read | before | after |
+| --- | --- | --- |
+| dashboard counts (150k cards) | 16.4 s | 0.4 s (2 ms warm) |
+| session start (`loadStudyCards` + `buildQueue`) | 8.8 s | 2.1 s (`loadStudyQueueIds` + `assembleQueue`) |
+
+`loadDashboard` and the new `loadStudyCounts` aggregate the same hidden/due rule
+in SQL; `loadStudyQueueIds` filters and orders in SQL (learning by due, reviews
+least stable first, new oldest first) and `assembleQueue` applies the existing
+shuffle/interleave. The new-cards limit uses a bounded heap instead of a full
+sort. `db.test.ts` checks that the SQL counts and queue ids agree with
+`countCards` and `buildQueue`. The simulation driver keeps its queue view and
+state counts in step instead of rebuilding 150k objects every session.
+
+**Two-year heavy workload.** 150,000 questions, 200 new cards a day, a
+1,000-answer daily budget (200 new + ~800 due), 5% skipped days, 730 days, 12 s
+per answer
+(`SIM_BIG=1 SIM_BIG_CARDS=150000 npx vitest run src/sim/big-deck.test.ts -t "fixed 200 new a day"`):
+
+| quarter | answers/day | backlog at start | new cards seen | true recall |
+| --- | --- | --- | --- | --- |
+| 1 | 977 | 1,404 | 8,929 | 73.3% |
+| 2 | 1000 | 2,346 | 13,715 | 77.8% |
+| 4 | 1000 | 2,700 | 21,970 | 80.8% |
+| 6 | 1000 | 3,047 | 30,259 | 82.5% |
+| 8 | 1000 | 3,450 | 37,363 | 82.9% |
+
+37,433 of 150,000 cards were introduced, 692,928 reviews were written (about
+229 MB of backup JSON for the log alone), and there were 0 scheduler invariant
+violations. The same run on 50,000 cards gave the same numbers, so the ceiling
+comes from the 1,000-answer day, not the deck size. The finding is that 200 new
+cards a day on top of ~800 due reviews does not fit a 1,000-answer day: the due
+backlog climbs to roughly 3,000-4,000 and new cards taper off after about eight
+quarters. It is a workload finding, not a bug; Glyph deliberately has no review
+or new-card cap. The simulated run took 332 s for 730 days on this machine.
+
+**MCP server.** `mcp/` exposes 20 tools over stdio (status, decks, search,
+add/edit/delete, import, queue, review, undo, marks, stats, settings, backup).
+It opens the app's SQLite file through `node:sqlite` and calls the real repo,
+scheduler and importer, so writes are identical to the UI. `mcp/smoke.ts`
+passes the full loop; `opencode.json` registers it for OpenCode.
+
+**UI review (frontend-design).** The app's identity holds up: one JetBrains Mono
+family, a black/white token set, the `glyph_` wordmark, tree connectors that
+carry hierarchy and row-level due/new counts. Fixes made: the blinking cursor
+and the hover nudge now respect `prefers-reduced-motion`, and question and
+explanation text are capped at 70ch while the option buttons stay full width
+(the old 768px mono column ran to ~90 characters). Remaining deliberate choices:
+all-mono type (identity, not a default) and colour used only for the answer
+states, always with an icon and screen-reader text.
+
+**Verification.** `npm run typecheck`, `npm run lint`, `npm test`,
+`npm run build` and `npm run mcp:smoke` all pass; see the commit message for the
+counts.
 
 ### Next steps
 

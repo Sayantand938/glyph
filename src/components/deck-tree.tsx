@@ -122,7 +122,7 @@ function DeckRow({
         </span>
         <CountCells counts={counts} />
         <ChevronRightIcon
-          className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
           aria-hidden
         />
       </button>

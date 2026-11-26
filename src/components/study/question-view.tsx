@@ -40,7 +40,7 @@ export function QuestionView({
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-base font-medium break-words whitespace-pre-wrap">
+      <p className="max-w-[70ch] text-base font-medium break-words whitespace-pre-wrap">
         <RichText text={data.note.question} />
       </p>
 
@@ -59,7 +59,7 @@ export function QuestionView({
 
       {answered && data.note.extra.trim() !== "" && (
         <div
-          className="rounded-lg border bg-muted/40 p-3 text-sm break-words whitespace-pre-wrap"
+          className="max-w-[70ch] rounded-lg border bg-muted/40 p-3 text-sm break-words whitespace-pre-wrap"
           aria-live="polite"
         >
           <RichText text={data.note.extra} />

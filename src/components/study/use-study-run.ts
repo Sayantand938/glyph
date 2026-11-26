@@ -1,7 +1,11 @@
 import * as React from "react"
 
 import { useLiveQuery } from "@/hooks/use-live-query"
-import { loadStudyCard, loadStudyCards, type StudyCardView } from "@/db/queries"
+import {
+  loadStudyCard,
+  loadStudyQueueIds,
+  type StudyCardView,
+} from "@/db/queries"
 import {
   applyReview,
   buryCard,
@@ -17,7 +21,7 @@ import { useStoredState } from "@/hooks/use-stored-state"
 import type { OptionIndex } from "@/lib/answer"
 import { marksOf, nextDayStart, toggleFlag } from "@/lib/card-marks"
 import { leechNotice, leechRule } from "@/lib/leech"
-import { buildQueue } from "@/lib/queue"
+import { assembleQueue } from "@/lib/queue"
 import {
   dropCardFrom,
   optionOrder,
@@ -59,17 +63,15 @@ export function useStudyRun(scope: StudyScope, options: StudyOptions) {
   // Build the queue once, at session start.
   React.useEffect(() => {
     let cancelled = false
-    loadStudyCards(scope)
-      .then((cards) => {
+    loadStudyQueueIds(scope, currentTime(), { include: options })
+      .then((ids) => {
         if (cancelled) return
-        const queue = buildQueue({
-          cards,
-          now: currentTime(),
+        const queue = assembleQueue(
+          ids,
           seed,
           // A tag, or a deck with decks inside it, mixes cards from several decks.
-          mixed: scope.kind === "tag" || scope.mixed === true,
-          include: options,
-        })
+          scope.kind === "tag" || scope.mixed === true
+        )
         shownAt.current = currentTime()
         setRun({
           queue,

@@ -41,6 +41,7 @@ src/lib/            Pure, unit-tested logic: answer, hash, shuffle, importer/, q
 src/hooks/          React hooks (use-theme.ts)
 public/             static assets, icons in public/icons/
 src-tauri/          Tauri 2 shell + the SQLite bridge (sql.rs) + finding nearby devices on the wifi (discovery.rs: mDNS and a line-based TCP channel, transport only); generated parts come from `tauri init`; android-overrides/ holds the two files changed inside the git-ignored gen/android
+mcp/                MCP server for OpenCode/other clients (server.ts, db.ts, smoke.ts, bench.ts); opens the same SQLite file and calls src/db and src/lib, never a second schema. See mcp/README.md.
 ```
 
 Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` are directories behind an `index.ts` barrel, so import them as `@/lib/backup`, `@/lib/importer` and `@/db/repo`; keep each file focused on one concern.

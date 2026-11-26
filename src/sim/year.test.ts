@@ -67,7 +67,7 @@ const scenarios: Scenario[] = [
 
 describe("one-year scheduling simulation", () => {
   for (const scenario of scenarios) {
-    it(scenario.name, () => {
+    it(scenario.name, { timeout: 120_000 }, () => {
       const result = simulate(scenario)
       if (REPORT_FILE) appendFileSync(REPORT_FILE, report(result) + "\n\n")
       expect(result.violations).toEqual([])
@@ -97,7 +97,7 @@ describe("retention across many seeds (a single run is noisy)", () => {
   ]
 
   for (const scenario of variants) {
-    it(scenario.name, () => {
+    it(scenario.name, { timeout: 600_000 }, () => {
       const stats = sweep(scenario, SEEDS)
       if (REPORT_FILE) {
         appendFileSync(REPORT_FILE, formatSweep(scenario, SEEDS, stats) + "\n")

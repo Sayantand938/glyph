@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { Rating } from "@/db/scheduler"
 import { parseImportText, validateRows } from "@/lib/importer"
+import { assembleQueue, buildQueue, countCards } from "@/lib/queue"
 
 import { computeDigests, readBackupParts } from "./backup-parts"
 import { openDatabase } from "./database"
@@ -13,6 +14,8 @@ import {
   loadDeckInfo,
   loadImageView,
   loadStudyCards,
+  loadStudyCounts,
+  loadStudyQueueIds,
   loadTagNames,
   loadTopicNotes,
 } from "./queries"
@@ -116,6 +119,31 @@ describe("import and queries", () => {
     expect(stored?.reps).toBe(1)
   })
 })
+
+describe("SQL study reads match the pure queue", () => {
+  it("counts and queue ids agree with countCards and buildQueue", async () => {
+    await importQuestions()
+    const data = await loadDashboard(NOW)
+    const quiz = (data.children.get(null) ?? []).find((d) => d.name === "Quiz")
+    expect(quiz).toBeDefined()
+    const scope = { kind: "deck" as const, id: quiz!.id }
+
+    const cards = await loadStudyCards(scope)
+    expect(await loadStudyCounts(scope, NOW)).toEqual(countCards(cards, NOW))
+
+    const ids = await loadStudyQueueIds(scope, NOW)
+    expect(assembled(ids, "seed")).toEqual(
+      buildQueue({ cards, now: NOW, seed: "seed" })
+    )
+  })
+})
+
+function assembled(
+  ids: Awaited<ReturnType<typeof loadStudyQueueIds>>,
+  seed: string
+) {
+  return assembleQueue(ids, seed)
+}
 
 describe("reviews", () => {
   it("applies a review, logs it and undoes it", async () => {

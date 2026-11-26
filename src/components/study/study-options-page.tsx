@@ -1,12 +1,11 @@
 import * as React from "react"
 
 import { useLiveQuery } from "@/hooks/use-live-query"
-import { loadStudyCards } from "@/db/queries"
+import { loadStudyCounts } from "@/db/queries"
 import { PageShell } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
 import { LoadingBlock } from "@/components/ui/spinner"
 import { useStoredState } from "@/hooks/use-stored-state"
-import { countCards } from "@/lib/queue"
 import {
   DEFAULT_STUDY_OPTIONS,
   parseStudyOptions,
@@ -44,15 +43,14 @@ export function StudyOptionsPage({
     DEFAULT_STUDY_OPTIONS,
     parseStudyOptions
   )
-  const cards = useLiveQuery(
-    () => loadStudyCards(scope),
+  const counts = useLiveQuery(
+    () => loadStudyCounts(scope, currentTime()),
     [scope],
     ["decks", "notes", "cards"]
   )
 
-  if (!cards) return <LoadingBlock label="Loading" />
+  if (!counts) return <LoadingBlock label="Loading" />
 
-  const counts = countCards(cards, currentTime())
   const total = sessionSize(counts, options)
 
   function toggle(key: "due" | "learning" | "new") {

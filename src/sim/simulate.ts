@@ -17,7 +17,7 @@ import {
   type Weights,
 } from "@/db/scheduler"
 import type { CardRow, RevlogRow } from "@/db/types"
-import { buildQueue, countCards } from "@/lib/queue"
+import { buildQueue, countCards, type QueueCard } from "@/lib/queue"
 import { requeueAgain, requeueGap } from "@/lib/session"
 import { mulberry32 } from "@/lib/shuffle"
 
@@ -218,6 +218,44 @@ function* simulateSteps(
   const violations: string[] = []
   let learningLeftBehind = 0
 
+  // The queue view is kept in step with `rows` instead of rebuilt every
+  // session: a 150k-card two-year run otherwise allocates 100M+ objects. State
+  // counts and the learning set are updated on each transition for the same
+  // reason.
+  const queueList: QueueCard[] = []
+  const queueById = new Map<string, QueueCard>()
+  const learningIds = new Set<string>()
+  const stateCounts: [number, number, number, number] = [0, 0, 0, 0]
+  for (const row of rows.values()) {
+    const view: QueueCard = {
+      cardId: row.cardId,
+      topicId: row.topicId,
+      state: row.state,
+      due: row.due,
+      stability: row.stability,
+    }
+    queueList.push(view)
+    queueById.set(row.cardId, view)
+    stateCounts[row.state] += 1
+  }
+
+  function syncQueueCard(row: CardRow) {
+    const view = queueById.get(row.cardId)
+    if (!view) return
+    if (view.state !== row.state) {
+      stateCounts[view.state] -= 1
+      stateCounts[row.state] += 1
+      view.state = row.state
+      if (row.state === State.Learning || row.state === State.Relearning) {
+        learningIds.add(row.cardId)
+      } else {
+        learningIds.delete(row.cardId)
+      }
+    }
+    view.due = row.due
+    view.stability = row.stability
+  }
+
   const baseHalfLife = (m: Memory) =>
     scenario.skill * 6 * (1 - 0.5 * m.difficulty)
 
@@ -243,15 +281,9 @@ function* simulateSteps(
     m.lastSeen = now
   }
 
-  /** The rows as the queue and the counts see them. */
+  /** The rows as the queue and the counts see them (kept in step with `rows`). */
   function queueCards() {
-    return [...rows.values()].map((r) => ({
-      cardId: r.cardId,
-      topicId: r.topicId,
-      state: r.state,
-      due: r.due,
-      stability: r.stability,
-    }))
+    return queueList
   }
 
   function runSession(
@@ -328,6 +360,7 @@ function* simulateSteps(
         violations.push(`${id.slice(0, 6)}: Good due earlier than Again`)
       }
       rows.set(id, result.row)
+      syncQueueCard(result.row)
       logs.push(result.log)
       if (result.row.state === State.Review && !graduatedDay.has(id)) {
         graduatedDay.set(id, day)
@@ -342,13 +375,9 @@ function* simulateSteps(
       index += 1
     }
 
-    for (const r of rows.values()) {
-      if (
-        (r.state === State.Learning || r.state === State.Relearning) &&
-        r.due <= now
-      ) {
-        learningLeftBehind += 1
-      }
+    for (const id of learningIds) {
+      const r = rows.get(id)
+      if (r && r.due <= now) learningLeftBehind += 1
     }
 
     daySession.answers += answers
@@ -410,7 +439,7 @@ function* simulateSteps(
       }
     }
 
-    for (const r of rows.values()) daySession.states[r.state] += 1
+    daySession.states = [...stateCounts]
     days.push(daySession)
     yield { day, logs }
   }

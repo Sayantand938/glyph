@@ -13,7 +13,17 @@ import {
   pathLabel,
   subtreeIds,
 } from "@/lib/deck-tree"
-import { ZERO_COUNTS, countCards, type DeckCounts } from "@/lib/queue"
+import {
+  CARD_LEARNING,
+  CARD_NEW,
+  CARD_RELEARNING,
+  CARD_REVIEW,
+  ZERO_COUNTS,
+  endOfLocalDay,
+  type DeckCounts,
+  type QueueGroups,
+  type QueueIds,
+} from "@/lib/queue"
 
 import { db } from "./database"
 import type { SqlRunner } from "./sql"
@@ -69,26 +79,32 @@ export async function loadDashboard(now: number): Promise<DashboardData> {
   return db.transaction(async (tx) => {
     const decks = await liveDeckList(tx)
     const deckIds = decks.map((d) => d.id)
-    // A card is not tombstoned with its note, so cards of deleted notes are
-    // left out here.
-    const cards = await queryRows(
-      tx,
-      CARDS,
-      `WHERE topicId ${IDS}
-         AND noteId NOT IN (SELECT id FROM notes WHERE deletedAt IS NOT NULL)`,
-      [JSON.stringify(deckIds)]
+    // The same rule as `countCards`, aggregated in SQL: on a 150k-card deck
+    // this reads one row per deck instead of building 150k card objects.
+    const rows = await tx.select(
+      `SELECT topicId,
+         SUM(CASE WHEN state = 0 THEN 1 ELSE 0 END) AS new,
+         SUM(CASE WHEN state IN (1, 3) AND due <= ? THEN 1 ELSE 0 END) AS learning,
+         SUM(CASE WHEN state = 2 AND due <= ? THEN 1 ELSE 0 END) AS due
+       FROM cards
+       WHERE topicId ${IDS}
+         AND suspended = 0
+         AND (buriedUntil = 0 OR buriedUntil <= ?)
+         AND noteId NOT IN (SELECT id FROM notes WHERE deletedAt IS NOT NULL)
+       GROUP BY topicId`,
+      [now, endOfLocalDay(now), JSON.stringify(deckIds), now]
     )
 
-    const byDeck = new Map<string, CardRow[]>()
-    for (const card of cards) {
-      const list = byDeck.get(card.topicId)
-      if (list) list.push(card)
-      else byDeck.set(card.topicId, [card])
-    }
     const counts = new Map<string, DeckCounts>()
-    for (const id of deckIds) {
-      const list = byDeck.get(id)
-      counts.set(id, list ? countCards(list, now) : ZERO_COUNTS)
+    for (const id of deckIds) counts.set(id, ZERO_COUNTS)
+    for (const row of rows) {
+      const id = String(row.topicId)
+      if (!counts.has(id)) continue
+      counts.set(id, {
+        new: Number(row.new ?? 0),
+        learning: Number(row.learning ?? 0),
+        due: Number(row.due ?? 0),
+      })
     }
 
     return { children: childrenOf(decks), counts }
@@ -100,6 +116,30 @@ function decksInScope(decks: Deck[], scope: QueryScope | null): Deck[] {
   if (scope === null || scope.kind === "tag") return decks
   const covered = new Set(subtreeIds(childrenOf(decks), scope.id))
   return decks.filter((d) => covered.has(d.id))
+}
+
+/**
+ * The SQL condition for the cards a scope covers, plus its parameters. A deck
+ * scope uses the denormalized `topicId` (no giant id list); a tag scope goes
+ * through the small `note_tags` index. Tombstoned notes are excluded rather
+ * than passed in as ids, which keeps the statement small on a huge deck.
+ */
+function cardsInScope(
+  decks: readonly Deck[],
+  scope: QueryScope | null
+): { sql: string; params: (string | number)[] } {
+  const live = "noteId NOT IN (SELECT id FROM notes WHERE deletedAt IS NOT NULL)"
+  if (scope?.kind === "tag") {
+    return {
+      sql: `noteId IN (SELECT noteId FROM note_tags WHERE tag = ?) AND ${live}`,
+      params: [scope.id],
+    }
+  }
+  const ids = decksInScope([...decks], scope).map((d) => d.id)
+  return {
+    sql: `topicId ${IDS} AND ${live}`,
+    params: [JSON.stringify(ids)],
+  }
 }
 
 /** The live notes of `decks`; with a tag scope only those carrying the tag. */
@@ -131,12 +171,107 @@ async function liveNotesIn(
 export async function loadStudyCards(scope: QueryScope): Promise<CardRow[]> {
   return db.transaction(async (tx) => {
     const decks = await liveDeckList(tx)
-    const notes = await liveNotesIn(tx, decksInScope(decks, scope), scope)
-    return getRows(
-      tx,
-      CARDS,
-      notes.map((n) => n.id)
+    const where = cardsInScope(decks, scope)
+    const rows = await tx.select(
+      `SELECT * FROM cards WHERE ${where.sql} ORDER BY cardId`,
+      where.params
     )
+    return rows.map(CARDS.fromRow)
+  })
+}
+
+/**
+ * The ids for a study session, filtered and ordered in SQL. On a 150k-card
+ * deck this returns roughly the due cards plus the new ones instead of the
+ * whole table, and the ordering matches `buildQueue` exactly (learning by due,
+ * reviews least stable first, new oldest first). Feed it to `assembleQueue`.
+ */
+export async function loadStudyQueueIds(
+  scope: QueryScope | null,
+  now: number,
+  options: { newLimit?: number | null; include?: Partial<QueueGroups> } = {}
+): Promise<QueueIds> {
+  return db.transaction(async (tx) => {
+    const decks = await liveDeckList(tx)
+    const where = cardsInScope(decks, scope)
+    const wanted = {
+      due: options.include?.due ?? true,
+      learning: options.include?.learning ?? true,
+      new: options.include?.new ?? true,
+    }
+    const hidden = "suspended = 0 AND (buriedUntil = 0 OR buriedUntil <= ?)"
+    const ids = (rows: readonly Record<string, unknown>[]) =>
+      rows.map((row) => String(row.cardId))
+
+    const learning = wanted.learning
+      ? ids(
+          await tx.select(
+            `SELECT cardId FROM cards
+             WHERE ${where.sql} AND ${hidden}
+               AND state IN (${CARD_LEARNING}, ${CARD_RELEARNING}) AND due <= ?
+             ORDER BY due, cardId`,
+            [...where.params, now, now]
+          )
+        )
+      : []
+
+    const review = wanted.due
+      ? ids(
+          await tx.select(
+            `SELECT cardId FROM cards
+             WHERE ${where.sql} AND ${hidden}
+               AND state = ${CARD_REVIEW} AND due <= ?
+             ORDER BY stability, due, cardId`,
+            [...where.params, now, endOfLocalDay(now)]
+          )
+        )
+      : []
+
+    const limit = options.newLimit
+    let fresh: string[] = []
+    if (wanted.new && limit !== 0) {
+      const rows = await tx.select(
+        `SELECT cardId FROM cards
+         WHERE ${where.sql} AND ${hidden} AND state = ${CARD_NEW}
+         ORDER BY due, cardId
+         ${limit === null || limit === undefined ? "" : "LIMIT ?"}`,
+        limit === null || limit === undefined
+          ? [...where.params, now]
+          : [...where.params, now, Math.max(0, Math.floor(limit))]
+      )
+      fresh = ids(rows)
+    }
+    return { learning, review, fresh }
+  })
+}
+
+/**
+ * The three counts the study-options page shows, without loading any cards.
+ * Same rule as `countCards`, so the page and the session agree.
+ */
+export async function loadStudyCounts(
+  scope: QueryScope | null,
+  now: number
+): Promise<DeckCounts> {
+  return db.transaction(async (tx) => {
+    const decks = await liveDeckList(tx)
+    const where = cardsInScope(decks, scope)
+    const [row] = await tx.select(
+      `SELECT
+         SUM(CASE WHEN state = 0 THEN 1 ELSE 0 END) AS new,
+         SUM(CASE WHEN state IN (1, 3) AND due <= ? THEN 1 ELSE 0 END) AS learning,
+         SUM(CASE WHEN state = 2 AND due <= ? THEN 1 ELSE 0 END) AS due
+       FROM cards
+       WHERE ${where.sql}
+         AND suspended = 0
+         AND (buriedUntil = 0 OR buriedUntil <= ?)`,
+      [now, endOfLocalDay(now), ...where.params, now]
+    )
+    return {
+      new: Number(row?.new ?? 0),
+      learning: Number(row?.learning ?? 0),
+      due: Number(row?.due ?? 0),
+    }
   })
 }
 

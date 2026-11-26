@@ -6,8 +6,10 @@ An opinionated learning app powered by Free Spaced Repetition Scheduling algorit
 npm install
 npm test
 
-npm run tauri dev     # desktop app (needs Rust and WebView2)
+npm run tauri dev     # desktop app (needs Rust and WebView2/WebKitGTK)
 npm run tauri build   # installer in src-tauri/target/release/bundle
+
+npm run mcp           # MCP server for OpenCode/other clients (see mcp/README.md)
 ```
 
 See [STATUS.md](STATUS.md) for the plan and progress, and [CLAUDE.md](CLAUDE.md) for contributor rules.
