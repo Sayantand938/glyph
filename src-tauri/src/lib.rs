@@ -4,6 +4,17 @@ mod sql;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    // Must be the first plugin: a second launch focuses the first window
+    // instead of opening another writer on the same SQLite file.
+    .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+      if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+      }
+    }))
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_fs::init())
     .manage(discovery::Discovery::default())
     .setup(|app| {
       if cfg!(debug_assertions) {

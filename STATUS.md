@@ -463,6 +463,41 @@ native file dialogs, and device sync.
 `npm run build` and `npm run mcp:smoke` all pass; see the commit message for the
 counts.
 
+### Desktop hardening (2026-11-27)
+
+- **One window per database.** `tauri-plugin-single-instance` is registered
+  first; a second launch focuses the existing window instead of opening a
+  second UI writing the same SQLite file.
+- **Native backup dialogs.** `tauri-plugin-dialog` and `tauri-plugin-fs` give
+  the desktop app a real Save/Open dialog for backups, scoped to `$HOME/**`.
+  The browser download and hidden file input remain as fallbacks (phone, dev
+  server); `src/lib/desktop-file.ts` decides and every failure falls back. A
+  save streams the blob 8 MB at a time, so a large log is not copied into one
+  second in-memory buffer.
+- **UI regression test.** `@testing-library/react`, `@testing-library/dom` and
+  `jsdom` are dev dependencies; Vitest now includes `.test.tsx`. The new test
+  pins the summary fix: focus lands on "Session complete" and the page calls
+  `window.scrollTo(0, 0)`.
+
+### Faster Rust builds on Arch / Omarchy (2026-11-27)
+
+- `src-tauri/.cargo/config.toml` uses `clang` with `-fuse-ld=mold` for
+  `x86_64-unknown-linux-gnu`. `clang` was already installed; `mold` was not, so
+  a static mold 2.40.4 (`mold` + `ld.mold`) was put in `~/.local/bin`. A system
+  install (`sudo pacman -S clang mold`) works the same way.
+- `src-tauri/Cargo.toml` adds `[profile.release-fast]` (`lto = false`,
+  `codegen-units = 16`, inherits release) and
+  `[profile.dev.package."*"] opt-level = 2`. The normal `[profile.release]`
+  is untouched, so shipped binaries keep full LTO.
+- The Tauri CLI has no `--profile` flag. Fast local bundle:
+  `CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 npm run tauri build -- --bundles appimage`;
+  Rust-only fast check: `cargo build --manifest-path src-tauri/Cargo.toml --profile release-fast`.
+- Linux release artifact is the AppImage (Arch/Omarchy); the deb target remains
+  available but is no longer the recommended output. `Glyph_0.5.0_amd64.AppImage`
+  (105.5 MiB, ELF) launches under `APPIMAGE_EXTRACT_AND_RUN=1` and creates the
+  schema (`user_version = 1`) and seed decks. The release compile took 26m46s
+  with mold on this machine.
+
 ### Next steps
 
 0. Reliability plan above: R0-R6 are done; R7 (rebuild a card from both devices' offline reviews, stop an undo resurrecting through a sync, then Capacitor or Tauri from real-device evidence) is only to be done if wanted. Try the backup reminder, the iOS share sheet and the folder backup on a real phone and a real second computer first.

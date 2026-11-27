@@ -17,7 +17,7 @@ npm run dev        # vite dev server only; the app needs Tauri to reach SQLite
 npm run build      # tsc --noEmit && vite build (the web assets Tauri bundles)
 npm test           # vitest run (node environment, src/**/*.test.ts)
 npm run tauri dev  # desktop shell around the dev server (Rust required)
-npm run tauri build # desktop exe + installer
+npm run tauri build -- --bundles appimage # Linux release (AppImage)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint .
 npm run format     # prettier --write "**/*.{ts,tsx}"
@@ -71,6 +71,8 @@ Tests sit next to the code as `*.test.ts`. `backup/`, `importer/` and `repo/` ar
 
 - Nearby-device sync (Settings > Data > Sync) needs, on Android, the `CHANGE_WIFI_MULTICAST_STATE` permission and a held multicast lock, which live in `src-tauri/gen/android` (git-ignored). After `tauri android init`, copy `src-tauri/android-overrides/*` back (see its README). The same `MainActivity.kt` pads the web view by the status bar, gesture bar and keyboard (edge-to-edge otherwise draws the page under them). The only Rust dependency added for this is `mdns-sd` (a webview cannot do mDNS or listen for connections).
 
+- Rust builds on Arch: `src-tauri/.cargo/config.toml` uses `clang` + `mold` (install both; mold must provide `mold` and `ld.mold` on PATH). `[profile.release-fast]` and `[profile.dev.package."*"] opt-level = 2` live in `src-tauri/Cargo.toml`. Tauri has no `--profile`, so for a fast bundle use `CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 npm run tauri build -- --bundles appimage`; `cargo build --profile release-fast` is the Rust-only fast check. Keep `[profile.release]` untouched for shipping.
+- Desktop file dialogs: under Tauri, backup export/import use `tauri-plugin-dialog` + `tauri-plugin-fs` (`src/lib/desktop-file.ts`) and fall back to the browser download/file input when the plugins are unavailable. The fs capability scope is `$HOME/**`; widen it deliberately. `tauri-plugin-single-instance` is registered first so a second launch focuses the existing window instead of opening a second writer on `glyph.db`.
 - `ts-fsrs` is 5.x: `elapsed_days` is deprecated but still on `Card`; check the installed types rather than guessing the API.
 - Elapsed days are local calendar days, not ts-fsrs's UTC dates: `db/scheduler.ts` shifts the dates it gives ts-fsrs (`lib/fsrs/days.ts`), and the optimizer's history builder uses the same function. Anything that computes "days since the last review" for scheduling must use `elapsedStudyDays`. The optimizer's model in `lib/fsrs/model.ts` mirrors ts-fsrs's formulas; `src/lib/fsrs.test.ts` fails if they drift apart after a `ts-fsrs` upgrade.
 - Keep source files ASCII: write non-ASCII characters (zero-width, combining marks) as `\uXXXX` escapes so tooling can't silently change or hide them. `src/ascii.test.ts` enforces this in `npm test`. Claude's Write/Edit tools turn a typed escape into the literal character, so put escapes in via `sed` or Python from Bash (sed needs the backslash doubled twice), or avoid them (e.g. `&middot;` in JSX text), then re-run the test.

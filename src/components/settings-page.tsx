@@ -239,7 +239,7 @@ export function SettingsPage({
 
       <Section
         title="Scheduling"
-        description="How likely you want to be to truly remember a card (not just guess it) when it comes due. Higher means more frequent reviews; lower means fewer, but more forgetting. Applies to reviews from now on. These settings sync with your backups and devices."
+        description="How often cards come back. Higher means more reviews; lower means fewer. Applies to future reviews and syncs with your data."
       >
         <div className="space-y-2 sm:max-w-sm">
           <div className="flex items-center justify-between text-sm">
@@ -274,7 +274,7 @@ export function SettingsPage({
 
       <Section
         title="Leeches"
-        description="A question you keep forgetting is often badly worded, or has a weak wrong option. When a question has been forgotten this many times it is tagged leech, so you can find it in Browse (Leeches) and fix it. This only marks questions; it never limits how many you study."
+        description="A card forgotten this many times gets the leech tag, so you can find and fix it in Browse. It never limits how much you study."
       >
         <div className="space-y-3 sm:max-w-sm">
           <div className="flex items-center justify-between gap-3 text-sm">
@@ -350,7 +350,7 @@ export function SettingsPage({
 
       <Section
         title="Data"
-        description="Your data lives only on this device. Move it between devices with a backup file."
+        description="Your data stays on this device. Move it with a backup file."
       >
         <div className="space-y-4">
           <div className="space-y-2">
@@ -409,9 +409,8 @@ export function SettingsPage({
             </div>
             <BackupStatusLine status={status} />
             <p className="text-xs text-muted-foreground">
-              Backups are manual: export a file now and then (a synced folder
-              such as Dropbox or OneDrive is a good place to keep it). Glyph
-              reminds you when one is due.
+              Backups are manual. Keep one in a synced folder; Glyph reminds
+              you when one is due.
             </p>
             <ImportCopies
               snapshots={snapshots}

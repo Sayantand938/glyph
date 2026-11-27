@@ -154,20 +154,16 @@ export function FsrsOptimizer() {
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Fits the memory model to your own answers, so intervals match how fast
-          you actually forget. It counts a correct answer as remembered or
-          guessed (one in four), which a flashcard app doesn&apos;t have to. You
-          can run it yourself at any time.
+          Fits FSRS to your own answers so intervals match your forgetting.
+          A correct guess counts as a guess (1 in 4). Run it any time.
         </p>
         {refitDue && (
           <p
             role="status"
             className="rounded-lg border border-primary/40 bg-primary/5 p-2 text-xs"
           >
-            Time to refit: you have made{" "}
-            {(totalReviews - fit.reviews).toLocaleString()} reviews since the
-            last fit. Press Optimize to keep the intervals matched to how you
-            forget.
+            Refit due: {(totalReviews - fit.reviews).toLocaleString()} reviews
+            since the last fit. Press Optimize.
           </p>
         )}
         <p className="text-xs text-muted-foreground">
@@ -177,9 +173,8 @@ export function FsrsOptimizer() {
         </p>
         {!refitDue && (
           <p className="text-xs text-muted-foreground">
-            It never runs by itself. A reminder shows here once{" "}
-            {FIT_REMINDER_STEP.toLocaleString()} reviews have been made since
-            the last fit.
+            Never automatic. A reminder appears after{" "}
+            {FIT_REMINDER_STEP.toLocaleString()} reviews.
           </p>
         )}
       </div>

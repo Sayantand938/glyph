@@ -24,6 +24,8 @@ import {
   type SnapshotMeta,
 } from "@/lib/backup"
 
+import { isTauriApp, openWithDialog, saveWithDialog } from "@/lib/desktop-file"
+
 import { recordBackup } from "./use-backup-status"
 
 export interface Notice {
@@ -97,7 +99,12 @@ async function deliver(
   filename: string,
   blob: Blob,
   setWaiting: (file: File | null) => void
-): Promise<"downloaded" | "shared" | "cancelled" | "waiting"> {
+): Promise<"saved" | "downloaded" | "shared" | "cancelled" | "waiting"> {
+  // Desktop first: a real Save dialog in the OS, not a webview download.
+  if (isTauriApp()) {
+    const saved = await saveWithDialog(filename, blob)
+    if (saved !== "unavailable") return saved
+  }
   const file = new File([blob], filename, { type: blob.type })
   const canShareFiles =
     typeof navigator.canShare === "function" &&
@@ -182,7 +189,13 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
         }
         recordBackup(made.now)
         return {
-          text: `Exported ${what} ${how === "shared" ? "through the share sheet" : "to " + filename}.`,
+          text: `Exported ${what} ${
+            how === "shared"
+              ? "through the share sheet"
+              : how === "saved"
+                ? "to the chosen file"
+                : "to " + filename
+          }.`,
           tone: "info",
         }
       }),
@@ -319,7 +332,15 @@ export function useBackupControls(onNotice: (notice: Notice) => void) {
     [refreshSnapshots]
   )
 
-  const chooseFile = React.useCallback(() => fileInput.current?.click(), [])
+  const chooseFile = React.useCallback(() => {
+    if (isTauriApp()) {
+      void openWithDialog().then((file) => {
+        if (file) void importFile(file)
+      })
+      return
+    }
+    fileInput.current?.click()
+  }, [importFile])
 
   const input = (
     <input

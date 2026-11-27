@@ -23,5 +23,20 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.12.7", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 mdns-sd = "0.22.0"
+
+# Fast local test builds: no LTO and more codegen units. The normal
+# [profile.release] is untouched, so shipped binaries keep full LTO.
+[profile.release-fast]
+inherits = "release"
+codegen-units = 16
+lto = false
+
+# Optimize dependencies (not this crate) in dev: tauri dev starts quicker and
+# incremental rebuilds of app code stay fast.
+[profile.dev.package."*"]
+opt-level = 2
