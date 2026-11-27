@@ -3,16 +3,19 @@ mod sql;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    // Must be the first plugin: a second launch focuses the first window
-    // instead of opening another writer on the same SQLite file.
-    .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-      if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-      }
-    }))
+  let builder = tauri::Builder::default();
+  // Must be the first plugin, and desktop-only: the crate is empty on mobile.
+  // A second launch focuses the first window instead of opening another writer
+  // on the same SQLite file.
+  #[cfg(desktop)]
+  let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+      let _ = window.unminimize();
+      let _ = window.show();
+      let _ = window.set_focus();
+    }
+  }));
+  builder
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .manage(discovery::Discovery::default())

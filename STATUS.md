@@ -498,6 +498,24 @@ counts.
   schema (`user_version = 1`) and seed decks. The release compile took 26m46s
   with mold on this machine.
 
+### Android build (2026-11-27)
+
+- Toolchain: JDK 21.0.13.1, Android SDK platform 37.0, build-tools 37.0.0,
+  NDK 27.2.12479018, Rust target `aarch64-linux-android`. All installed under
+  `~/Android/Sdk` / mise (no system packages changed).
+- `tauri android init --ci` generated `gen/android`; `android-overrides` were
+  copied in. `tauri-plugin-single-instance` is now registered under
+  `#[cfg(desktop)]` because it is an empty crate on mobile.
+- `tauri android build --apk --target aarch64` built the app (Rust 22m03s on the
+  first run, Gradle after that) and produced an unsigned 17 MB APK. It was
+  signed locally with a generated keystore (outside the repo) and verified with
+  `apksigner`: package `app.glyph.desktop`, version 0.5.0, target SDK 37,
+  `arm64-v8a`, launch activity `MainActivity`.
+- Installable artifact: `releases/Glyph-0.5.0-arm64.apk` (17 MB). No Android
+  device was attached, so it was not installed or launched on hardware.
+- Keystore and passwords live in `~/.config/glyph/` and are deliberately not
+  committed.
+
 ### Next steps
 
 0. Reliability plan above: R0-R6 are done; R7 (rebuild a card from both devices' offline reviews, stop an undo resurrecting through a sync, then Capacitor or Tauri from real-device evidence) is only to be done if wanted. Try the backup reminder, the iOS share sheet and the folder backup on a real phone and a real second computer first.
