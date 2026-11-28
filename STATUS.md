@@ -195,7 +195,11 @@ Device sync (above) used to send each device's whole backup every time (100 MB+ 
 ### After v0.4.0: nearby sync, manual fit and backup, no overscroll
 
 - **Nearby devices (built, only partly verified).** Settings > Data > Sync lists other Glyph devices on the wifi, so pairing needs no pasted codes. `src-tauri/src/discovery.rs` is transport only: it announces this device with mDNS (`_glyph-sync._tcp`, crate `mdns-sd`, the one new dependency; a webview cannot do mDNS or listen), listens on a TCP port and carries newline-delimited messages (`discovery_start/stop/connect/send/close`, events `nearby://peers|message|closed`). The conversation is pure TypeScript, `lib/sync/nearby.ts` (`NearbyInitiator`, `NearbyResponder`; 18 tests in `src/lib/nearby.test.ts`): first time, the initiator shows a 4-digit number and the other device shows the same one with the asker's name until its user taps Accept, and both keep a random shared key; next time the responder sends a challenge and each side proves the key with an HMAC over both sides' nonces, so there is no tap and a fake device (or a fake "paired" one) is refused. The WebRTC offer and reply codes then travel as `offer`/`answer` messages over that channel; everything after (connection, delta sync, digests) is unchanged. `hooks/use-nearby.ts` wraps `usePeerSync` (which is untouched) and `components/sync/sync-page.tsx` shows "Devices nearby", this device's name, Paired devices with Forget, and the old paste-code flow below. Remembered devices are in localStorage (`glyph.trustedDevices`). **Android needs** the `ACCESS_WIFI_STATE` and `CHANGE_WIFI_MULTICAST_STATE` permissions and a held multicast lock; `src-tauri/gen` is git-ignored, so the two changed files are kept in `src-tauri/android-overrides/` (see its README). **Verified:** the pure conversation (tests), `cargo check`, and an Android APK build. **Not verified:** discovery, the confirm number, a remembered re-sync and the multicast lock on a real laptop and phone (wireless adb dropped before the test), Windows firewall behaviour, networks with client isolation, and VPN/Hyper-V adapters on Windows. Pairing only protects against a casual device on the same wifi (the key is sent in the clear once, on the LAN).
-- **Android status bar.** The page was drawn under the status bar and gesture bar (`enableEdgeToEdge()` with no insets). The same `MainActivity.kt` now pads the content by the system bars, display cutout and keyboard. Not yet seen on the phone.
+- **Android status bar.** Fixed and verified on a phone on 2026-11-28 (see
+  "First run on a phone, edge to edge and the elastic scroll"): the page keeps its
+  text clear of the bars with native padding, and the bands behind them are
+  painted from the theme the page reports back, because this web view reports
+  `env(safe-area-inset-*)` as 0.
 - **The FSRS fit is manual.** The background auto re-fit (`useAutoFit`) is gone, with its checkbox. Settings > Scheduling > Optimize is the only way to fit; `fitReminderDue` (`lib/fsrs/auto.ts`) shows "Time to refit" once 1,000 reviews have been made since the last fit (the count saved with the fit, so it also counts a fit made on a synced device). Why: most attempts adopted nothing, it competed with sync for CPU, and it changed intervals silently. The `autoFit` setting key is still parsed (ignored) so a backup or sync from an older version still reads.
 - **Backups are manual.** The automatic folder copy (`use-auto-backup.ts`, `db/backup-folder.ts`, its Settings controls and the file naming and pruning in `lib/backup/reminder.ts`) is removed. Export backup, Restore backup, the last-backup line and the "backup is due" reminder stay.
 - **No Tags section on the home screen.** The collapsible "Tags (n)" list under the deck tree (`components/tag-list.tsx`, with its New / Lrn / Due counts, Study and Browse) is removed, along with the per-tag query in `loadDashboard` and the `glyph.tagsCollapsed` preference. Tags themselves are unchanged: the editor, the importer, Browse (tag chips and the Tags column) and tag scopes still work. The earlier "Tags" section text below describes the removed dashboard part.
@@ -515,6 +519,48 @@ counts.
   device was attached, so it was not installed or launched on hardware.
 - Keystore and passwords live in `~/.config/glyph/` and are deliberately not
   committed.
+
+### First run on a phone, edge to edge and the elastic scroll (2026-11-28)
+
+- **Installed and launched on hardware.** `adb install` of the release APK on an
+  OPPO K13 5G (CPH2729, Android 16, SDK 36, arm64-v8a) succeeded, `MainActivity`
+  resumed with no `FATAL` in logcat, the web view rendered the seeded decks and
+  the footer version. The SQLite file was created on first start.
+- **The status bar bug, seen at last.** The two-tone bands: `enableEdgeToEdge()`
+  makes the bars transparent, and the window background of the stock
+  `Theme.Material3.DayNight` (`#141218`, wallpaper-tinted by ColorOS) showed in
+  the band `MainActivity` padded the web view away from, against the page's
+  `oklch(0 0 0)`. Measured on the device before the fix: bands `#141218`, page
+  `#000000`.
+- **`env(safe-area-inset-*)` is 0 in this web view.** Painting the page edge to
+  edge and padding it in CSS therefore slid the header under the status bar
+  (`glyph_` clipped). CSS safe areas are not an option here.
+- **What the fix is now.** `MainActivity.kt` keeps the native padding (system
+  bars, display cutout, keyboard), and the page reports its resolved theme over a
+  JS bridge (`addJavascriptInterface(..., "GlyphPage")`, called from
+  `src/lib/page-chrome.ts` by the theme provider). The host paints the band behind
+  the bars in that colour and sets the status-bar and navigation-bar icon
+  contrast. Verified on the phone in both themes: bands `#000000` on the dark page
+  and `#FFFFFF` on the light page, with dark icons on light.
+- **The elastic scroll is a native web-view effect.** `overscroll-behavior: none`
+  on `html, body` was already there and stops the browser glow, but the page still
+  rubber-banded on Android: the web view's own edge stretch, which CSS cannot
+  reach. `overScrollMode = OVER_SCROLL_NEVER` on the web view fixes it. It is set
+  from a `viewTreeObserver` layout listener because the Tauri shell creates the web
+  view after `onCreate`, so a `post {}` walk runs too early and silently does
+  nothing (that first attempt changed nothing on the device).
+- **How it was measured.** Drag down at the top of the Settings page, screenshot
+  mid-gesture, `compare -metric AE` against the at-rest frame. Old build: 5.3–5.7%
+  of pixels moved (a ~52 px downward shift, springing back on release). Fixed
+  build: 0.0008%, i.e. only the clock.
+- **Settings copy trimmed.** The section and row descriptions were cut to one
+  sentence each (Appearance lost its line entirely; "Fits the scheduler to your own
+  answers. A correct guess counts as 1 in 4." for the optimizer; "Stored on this
+  device only." for Data). No test asserted the old strings.
+- **Note for Android builds here:** Gradle needs JDK 21, and mise's `latest` is 27,
+  so `JAVA_HOME` must point at `~/.local/share/mise/installs/java/21.0.13.1+2.0.LTS`.
+  Sign with `zipalign` + `apksigner` and `~/.config/glyph/android-release.jks`;
+  `releases/` is git-ignored.
 
 ### Next steps
 

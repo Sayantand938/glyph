@@ -154,8 +154,8 @@ export function FsrsOptimizer() {
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Fits FSRS to your own answers so intervals match your forgetting.
-          A correct guess counts as a guess (1 in 4). Run it any time.
+          Fits the scheduler to your own answers. A correct guess counts as 1 in
+          4.
         </p>
         {refitDue && (
           <p
@@ -169,12 +169,12 @@ export function FsrsOptimizer() {
         <p className="text-xs text-muted-foreground">
           {scored === null
             ? "Counting your reviews..."
-            : `${scored} usable reviews (${MIN_SCORED_REVIEWS} needed; more is better).`}
+            : `${scored} usable reviews (${MIN_SCORED_REVIEWS} needed).`}
         </p>
         {!refitDue && (
           <p className="text-xs text-muted-foreground">
-            Never automatic. A reminder appears after{" "}
-            {FIT_REMINDER_STEP.toLocaleString()} reviews.
+            Never automatic. Reminder after {FIT_REMINDER_STEP.toLocaleString()}{" "}
+            reviews.
           </p>
         )}
       </div>

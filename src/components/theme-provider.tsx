@@ -6,6 +6,7 @@ import {
   useTheme,
   type Theme,
 } from "@/hooks/use-theme"
+import { reportPageTheme } from "@/lib/page-chrome"
 
 const DARK_QUERY = "(prefers-color-scheme: dark)"
 
@@ -49,6 +50,7 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.head.appendChild(style)
     root.classList.toggle("dark", resolvedTheme === "dark")
     root.style.colorScheme = resolvedTheme
+    reportPageTheme(resolvedTheme === "dark")
     const frame = requestAnimationFrame(() =>
       requestAnimationFrame(() => style.remove())
     )

@@ -132,6 +132,10 @@
   html,
   body {
     overscroll-behavior: none;
+    /* The screen the status bar and the gesture bar sit over (Android draws the
+       page behind both). Paint it on the root as well, so those bars show the
+       page background and not a band of the Android theme colour. */
+    background-color: var(--background);
     }
   ::selection {
     @apply bg-foreground text-background;

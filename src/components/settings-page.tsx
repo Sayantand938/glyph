@@ -50,7 +50,9 @@ function Section({
       <div className="space-y-1">
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
         {description && (
-          <p className="max-w-[70ch] text-xs text-muted-foreground">{description}</p>
+          <p className="max-w-[70ch] text-xs text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
       {children}
@@ -114,9 +116,7 @@ function ImportCopies({
         Undo an import
       </p>
       <p className="text-xs text-muted-foreground">
-        Before every backup import Glyph keeps a copy of your data here (the
-        last {snapshots.length > 1 ? snapshots.length : "one"}, on this device).
-        Putting one back replaces your data with it.
+        A copy is kept before every import. Restoring replaces your data.
       </p>
       <ul className="divide-y overflow-hidden rounded-xl border">
         {snapshots.map((meta) => (
@@ -213,10 +213,7 @@ export function SettingsPage({
         <h2 className="text-base font-semibold tracking-tight">Settings</h2>
       </div>
 
-      <Section
-        title="Appearance"
-        description="Pick a theme, or follow your device."
-      >
+      <Section title="Appearance">
         <div
           role="group"
           aria-label="Theme"
@@ -239,7 +236,7 @@ export function SettingsPage({
 
       <Section
         title="Scheduling"
-        description="How often cards come back. Higher means more reviews; lower means fewer. Applies to future reviews and syncs with your data."
+        description="How often cards come back. Higher means more reviews."
       >
         <div className="space-y-2 sm:max-w-sm">
           <div className="flex items-center justify-between text-sm">
@@ -274,7 +271,7 @@ export function SettingsPage({
 
       <Section
         title="Leeches"
-        description="A card forgotten this many times gets the leech tag, so you can find and fix it in Browse. It never limits how much you study."
+        description="A card forgotten this many times gets the leech tag."
       >
         <div className="space-y-3 sm:max-w-sm">
           <div className="flex items-center justify-between gap-3 text-sm">
@@ -348,10 +345,7 @@ export function SettingsPage({
         </div>
       </Section>
 
-      <Section
-        title="Data"
-        description="Your data stays on this device. Move it with a backup file."
-      >
+      <Section title="Data" description="Stored on this device only.">
         <div className="space-y-4">
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -361,7 +355,7 @@ export function SettingsPage({
               <DataAction
                 icon={<UploadIcon aria-hidden />}
                 title="Import questions"
-                description="Add decks and questions from a JSON file."
+                description="From a JSON file."
                 onClick={onImportJson}
               />
             </div>
@@ -374,7 +368,7 @@ export function SettingsPage({
               <DataAction
                 icon={<RefreshCwIcon aria-hidden />}
                 title="Sync with another device"
-                description="Merge with a phone or computer on the same wifi, no server."
+                description="A phone or computer on this wifi."
                 onClick={onSync}
               />
             </div>
@@ -387,7 +381,7 @@ export function SettingsPage({
               <DataAction
                 icon={<DownloadIcon aria-hidden />}
                 title="Export backup"
-                description="Save everything (decks, progress, images) to a file."
+                description="Everything, to one file."
                 disabled={busy}
                 onClick={onExportBackup}
               />
@@ -395,22 +389,21 @@ export function SettingsPage({
                 <DataAction
                   icon={<ShareIcon aria-hidden />}
                   title="Share backup file"
-                  description="The backup is ready. Tap to save it with the share sheet."
+                  description="Ready to save."
                   onClick={onShare}
                 />
               )}
               <DataAction
                 icon={<FileUpIcon aria-hidden />}
                 title="Restore backup"
-                description="Load a backup file and merge it into this device."
+                description="Merge a backup into this device."
                 disabled={busy}
                 onClick={onImportBackup}
               />
             </div>
             <BackupStatusLine status={status} />
             <p className="text-xs text-muted-foreground">
-              Backups are manual. Keep one in a synced folder; Glyph reminds
-              you when one is due.
+              Manual only. Glyph reminds you when one is due.
             </p>
             <ImportCopies
               snapshots={snapshots}
@@ -425,7 +418,7 @@ export function SettingsPage({
       <Section title="Statistics">
         <div className="flex items-center gap-2 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           <BarChart3Icon className="size-4 shrink-0" aria-hidden />
-          <p>Review statistics are coming soon.</p>
+          <p>Coming soon.</p>
         </div>
       </Section>
 
