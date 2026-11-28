@@ -39,7 +39,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       # compileSdk/targetSdk 37 (the platform is packaged as android-37.0), the
       # build-tools and the NDK version the generated project uses.
