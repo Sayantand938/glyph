@@ -1,0 +1,82 @@
+name: Android APK
+
+# Unsigned arm64 APK for now: signing stays a local step with
+# ~/.config/glyph/android-release.jks. Runs on GitHub's runners so the release
+# build does not tie up the laptop (it takes 20+ minutes cold on 4 cores).
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # The Rust target directory makes cold builds long; caching it is the
+      # difference between ~20 minutes and ~5 on a rebuild.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      # compileSdk/targetSdk 37 (the platform is packaged as android-37.0), the
+      # build-tools and the NDK version the generated project uses.
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
+            "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      # src-tauri/gen is git-ignored, so the Android project is generated here and
+      # the two files the app changes are copied back in (see
+      # src-tauri/android-overrides/README.md). Without this the APK loses the
+      # multicast permissions that nearby sync needs and the edge-to-edge and
+      # overscroll fixes in MainActivity.
+      - name: Generate the Android project and apply the overrides
+        run: |
+          npx tauri android init --ci
+          cp src-tauri/android-overrides/MainActivity.kt \
+            src-tauri/gen/android/app/src/main/java/app/glyph/desktop/MainActivity.kt
+          cp src-tauri/android-overrides/AndroidManifest.xml \
+            src-tauri/gen/android/app/src/main/AndroidManifest.xml
+
+      - name: Build the APK
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Show what was built
+        run: |
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' \
+            -printf '%p %s bytes\n'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glyph-apk-unsigned-arm64
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
